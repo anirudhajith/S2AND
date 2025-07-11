@@ -41,13 +41,11 @@ ROMANIZATION_EXCEPTIONS = {
     "yang": "yang",  # 杨 - already correct (but see Cantonese "yeung")
     "ying": "ying",  # 英/应 - already correct
     "yu": "yu",  # 于/余/郁 - already correct
-    
     # Yale romanization (Cantonese)
     "jeung": "zhang",
-    "leuhng": "liang", 
+    "leuhng": "liang",
     "cheung": "zhang",
     "yeung": "yang",
-    
     # Older romanization variants
     "yew": "yu",
     "kwan": "guan",
@@ -280,6 +278,7 @@ TAIWANESE_RULES = {
     "pei": "bei",
     "teng": "deng",
     "ting": "ding",
+    "tiong": "tang",  # Hokkien/Teochew romanization of Tang (唐)
     "tsung": "zong",
     "tsai": "cai",
     # "yung": "yong",  # Removed - surname-specific mapping, keep in CANTONESE_SURNAMES only
@@ -287,6 +286,18 @@ TAIWANESE_RULES = {
     "jui": "rui",
     "pao": "bao",
     "tsao": "cao",
+    # Missing Taiwanese romanizations
+    "jyh": "zhi",  # For Jyh-Hung
+    "horng": "hong",  # For Horng-Shyang
+    "shyang": "xiang",  # For Horng-Shyang
+    "miin": "min",  # For Miin-Huey
+    "huey": "hui",  # For Miin-Huey
+    "chew": "zhou",  # For Chew-Wun (common variant of Zhou/Chou)
+    "wun": "wen",  # For Chew-Wun
+    "jeng": "zheng",  # For Jeng-Tzong
+    "tzong": "zong",  # For Jeng-Tzong
+    "yau": "yao",  # Common variant for Yao
+    "hsieh": "xie",  # Common variant for Xie
 }
 
 # Sub-layer 2.4: Wade-Giles systematic patterns (lowest priority)
@@ -537,7 +548,7 @@ CANTONESE_SURNAMES = {
     "lim": ("lin", "林"),  # 林 - Cantonese Lim = Mandarin Lin
     "im": ("lin", "林"),  # 林 - Alternative romanization of Lim
     # Hokkien/Teochew surnames
-    "teo": ("zhang", "张"),  # 张 - Teochew/Hokkien Teo = Mandarin Zhang  
+    "teo": ("zhang", "张"),  # 张 - Teochew/Hokkien Teo = Mandarin Zhang
     "goh": ("wu", "吴"),  # 吴 - Teochew/Hokkien Goh = Mandarin Wu
     "khoo": ("qiu", "邱"),  # 邱 - Teochew/Hokkien Khoo = Mandarin Qiu
 }
@@ -680,6 +691,13 @@ KOREAN_ONLY_SURNAMES = frozenset(
         "koo",
         "yeo",
         "pyo",
+        # Additional Korean-only surnames
+        "son",
+        "an",
+        "oh",
+        "na",
+        "go",
+        "roh",
     }
 )
 
@@ -723,6 +741,16 @@ KOREAN_GIVEN_PATTERNS = frozenset(
         "byeol",
         "hana",
         "nuri",
+        # Additional Korean given name patterns
+        "kyu",
+        "hye",
+        "ji",
+        "su",
+        "ae",
+        "eun",
+        "seong",
+        "kyun",
+        "bum",
     }
 )
 
@@ -774,6 +802,10 @@ VIETNAMESE_SURNAMES = frozenset(
         "ngô",
         "dương",
         "lý",
+        # Additional Vietnamese surnames
+        "dinh",  # Đinh
+        "truong",  # Trương
+        "trinh",  # Trịnh
     }
 )
 
@@ -813,6 +845,15 @@ VIETNAMESE_GIVEN_PATTERNS = frozenset(
         "son",  # 山 - mountain, Vietnamese given name
         "long",  # 龙 - dragon, Vietnamese given name
         "tuan",  # Vietnamese given name
+        # Additional Vietnamese given name patterns
+        "ngoc",  # 玉 - jade, common Vietnamese given name
+        "trang",  # 庄 - common Vietnamese given name
+        "phuong",  # 凤 - phoenix, Vietnamese given name
+        "cuong",  # 强 - strong, Vietnamese given name
+        "quoc",  # 国 - country, Vietnamese given name
+        "thao",  # Vietnamese given name
+        "trung",  # 中 - middle, Vietnamese given name
+        "hieu",  # 孝 - filial piety, Vietnamese given name
     }
 )
 
@@ -860,28 +901,6 @@ VALID_CHINESE_RIMES = frozenset(
         "o",
         "u",
         "ü",
-        # Single letter initials (for names like "Y. Z. Wei")
-        "b",
-        "c",
-        "d",
-        "f",
-        "g",
-        "h",
-        "j",
-        "k",
-        "l",
-        "m",
-        "n",
-        "p",
-        "q",
-        "r",
-        "s",
-        "t",
-        "v",
-        "w",
-        "x",
-        "y",
-        "z",
         # Diphthongs
         "ai",
         "ei",
@@ -950,6 +969,23 @@ FORBIDDEN_PHONETIC_PATTERNS = frozenset(
         "ft",
         "pt",
         "xt",
+        # Additional English consonant clusters impossible in Chinese
+        "dr",  # e.g., Andrew, Adrian
+        "br",  # e.g., Brian, Bruce
+        "fr",  # e.g., Frank, Fred
+        "gr",  # e.g., Grace, Greg
+        "pr",  # e.g., Peter, Paul
+        "tr",  # e.g., Tracy, Tom
+        "cl",  # e.g., Clara, Claire
+        "fl",  # e.g., Flora, Frank
+        "gl",  # e.g., Gloria, Glenn
+        "pl",  # e.g., Plum, Philip
+        "sl",  # e.g., Slim, Slade
+        "sm",  # e.g., Smith, Sam
+        "sn",  # e.g., Snow, Snyder
+        "st",  # e.g., Steven, Stuart
+        "sk",  # e.g., Scott, Skip
+        "sp",  # e.g., Spencer, Spike
         # Double consonants (except ng)
         "bb",
         "cc",

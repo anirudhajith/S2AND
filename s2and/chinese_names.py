@@ -137,7 +137,7 @@ class ChineseNameConfig:
                 r"[（(][^)（）]*[)）]|"  # parentheticals
                 r"([A-Z])\.(?=\s)|"  # initials followed by space
                 r"([A-Z])\.-([A-Z])\.|"  # compound initials: "X.-H." -> "X-H"
-                r"([A-Z])\.(?=-)|"  # initials followed by hyphen
+                r"([A-Z])\.-(?=[A-Z])|"  # initials followed by hyphen and letter: "X.-M" -> "X-M"
                 r"[_|=]",  # invalid characters
                 re.IGNORECASE,
             ),
@@ -709,7 +709,7 @@ class ChineseNameDetector:
             return match.group(1) + " "
         elif match.group(2) and match.group(3):  # Compound initials: "X.-H." -> "X-H"
             return match.group(2) + "-" + match.group(3)
-        elif match.group(4):  # Initial followed by hyphen: "X.-" -> "X-"
+        elif match.group(4):  # Initial followed by hyphen and letter: "X.-M" -> "X-M"
             return match.group(4) + "-"
         return " "
 
@@ -783,14 +783,25 @@ class ChineseNameDetector:
         # Use original tokens for ethnicity detection (surname databases use original romanizations)
         original_keys = [t.lower().replace(" ", "") for t in tokens]
 
+        # Calculate Chinese surname evidence as counterbalance
+        chinese_surname_strength = self._calculate_chinese_surname_strength(original_keys)
+
         # Check for Korean patterns with multi-factor scoring
         korean_score = self._calculate_korean_score(original_keys)
-        if korean_score >= 2.8:  # Increased threshold to reduce false positives
+
+        # More aggressive threshold adjustment when Korean patterns are strong
+        if korean_score >= 2.5:  # If Korean score is already high, be more restrictive
+            korean_threshold = 2.8 + (chinese_surname_strength * 0.5)  # Halve the Chinese bonus effect
+        else:
+            korean_threshold = 2.8 + chinese_surname_strength  # Normal threshold adjustment
+
+        if korean_score >= korean_threshold:
             return ParseResult.failure("appears to be Korean name")
 
         # Check for Vietnamese patterns with multi-factor scoring
         vietnamese_score = self._calculate_vietnamese_score(original_keys)
-        if vietnamese_score >= 1.5:  # Lower threshold since Vietnamese overlap is high
+        vietnamese_threshold = 1.5 + chinese_surname_strength  # Dynamic threshold based on Chinese evidence
+        if vietnamese_score >= vietnamese_threshold:
             return ParseResult.failure("appears to be Vietnamese name")
 
         # Check for Japanese patterns
@@ -879,6 +890,84 @@ class ChineseNameDetector:
 
         return score
 
+    def _calculate_chinese_surname_strength(self, original_keys: List[str]) -> float:
+        """Calculate strength of Chinese surname evidence as counterbalance to non-Chinese classification."""
+        strength = 0.0
+
+        # Expand keys to handle hyphenated names
+        expanded_keys = [part for key in original_keys for part in ([key] + (key.split("-") if "-" in key else []))]
+
+        # Track overlapping surnames that could be Korean/Vietnamese
+        overlapping_korean_surnames_found = 0
+        vietnamese_surnames_found = 0
+
+        # Calculate Korean evidence to further reduce overlapping surname strength
+        korean_given_count = sum(1 for key in expanded_keys if key in KOREAN_GIVEN_PATTERNS)
+        has_korean_patterns = korean_given_count > 0
+
+        for key in expanded_keys:
+            clean_key = key.replace(" ", "")
+            normalized_key = self._data_service._normalize_token(key).replace(" ", "")
+
+            # Check if token is a Chinese surname
+            is_chinese_surname = clean_key in self._data.surnames or normalized_key in self._data.surnames_normalized
+
+            if is_chinese_surname:
+                # Check if this is an overlapping surname that could be Korean/Vietnamese
+                is_overlapping_korean = clean_key in OVERLAPPING_KOREAN_SURNAMES
+                is_vietnamese = clean_key in VIETNAMESE_SURNAMES
+
+                if is_overlapping_korean:
+                    overlapping_korean_surnames_found += 1
+                if is_vietnamese:
+                    vietnamese_surnames_found += 1
+
+                # Get surname frequency for weighting
+                surname_freq = self._data.surname_frequencies.get(clean_key, 0)
+                if surname_freq == 0:
+                    surname_freq = self._data.surname_frequencies.get(normalized_key, 0)
+
+                if surname_freq > 0:
+                    # Base frequency bonus
+                    if surname_freq >= 10000:  # Very common surnames (e.g., Wang, Li, Zhang)
+                        base_strength = 1.2
+                    elif surname_freq >= 1000:  # Common surnames
+                        base_strength = 0.8
+                    elif surname_freq >= 100:  # Moderate surnames
+                        base_strength = 0.5
+                    else:  # Rare surnames
+                        base_strength = 0.2
+
+                    # Reduce strength for overlapping surnames
+                    if is_overlapping_korean:
+                        reduction = 0.6  # Base 40% reduction
+                        if has_korean_patterns:
+                            reduction = 0.2  # Additional reduction if Korean patterns present
+                        base_strength *= reduction
+                    elif is_vietnamese:
+                        base_strength *= 0.6  # 40% reduction for Vietnamese overlap
+
+                    strength += base_strength
+                else:
+                    # Known surname but no frequency data
+                    base_strength = 0.3
+                    if is_overlapping_korean:
+                        reduction = 0.6
+                        if has_korean_patterns:
+                            reduction = 0.2
+                        base_strength *= reduction
+                    elif is_vietnamese:
+                        base_strength *= 0.6
+                    strength += base_strength
+
+        # Additional penalty if name has multiple overlapping surnames (likely Korean/Vietnamese)
+        if overlapping_korean_surnames_found >= 2:
+            strength *= 0.5  # Halve strength if multiple Korean overlaps
+        if vietnamese_surnames_found >= 2:
+            strength *= 0.5  # Halve strength if multiple Vietnamese overlaps
+
+        return strength
+
     def _is_valid_chinese_phonetics(self, token: str) -> bool:
         """Check if a token could plausibly be Chinese based on phonetic structure."""
         if not token:
@@ -899,9 +988,12 @@ class ChineseNameDetector:
         if any(pattern in t for pattern in FORBIDDEN_PHONETIC_PATTERNS):
             return False
 
-        # Special case: single letters that can be initials or standalone vowels
-        if len(t) == 1 and t in VALID_CHINESE_RIMES:
-            return True
+        # Special case: single letters
+        # Only allow as initials, not as standalone surnames in Western name patterns
+        if len(t) == 1:
+            # Single letters should only be valid as given name components (initials)
+            # not as surnames, especially in Western name patterns
+            return True  # Still allow for processing, but surname logic will filter them out
 
         # Split into onset and rime using longest-match for onsets
         for onset in sorted(VALID_CHINESE_ONSETS, key=len, reverse=True):
@@ -962,12 +1054,40 @@ class ChineseNameDetector:
         for positions in [(-1, slice(None, -1)), (0, slice(1, None))]:
             surname_pos, given_slice = positions
             if (
-                self._data_service._normalize_token(order[surname_pos]).replace(" ", "")
+                len(order[surname_pos]) > 1  # Don't treat single letters as surnames
+                and self._data_service._normalize_token(order[surname_pos]).replace(" ", "")
                 in self._data.surnames_normalized
             ):
                 surname_tokens = [order[surname_pos]]
                 given_tokens = order[given_slice]
                 if given_tokens:
+                    # Check if this parse would have a reasonable score
+                    score = self._calculate_parse_score(surname_tokens, given_tokens, order)
+
+                    # Additional check: reject single-letter given names in multi-syllable contexts
+                    has_single_letter_given = any(len(token) == 1 for token in given_tokens)
+                    has_multi_syllable_tokens = any(len(token) > 3 for token in order)
+
+                    # Check if any multi-syllable token is a known Chinese surname
+                    has_chinese_surname_in_tokens = any(
+                        len(token) > 3
+                        and (
+                            token.lower().replace(" ", "") in self._data.surnames
+                            or self._data_service._normalize_token(token).replace(" ", "")
+                            in self._data.surnames_normalized
+                        )
+                        for token in order
+                    )
+
+                    if (
+                        has_single_letter_given
+                        and has_multi_syllable_tokens
+                        and score < -25.0
+                        and not has_chinese_surname_in_tokens
+                    ):
+                        # This looks like a Western name where single letters are initials
+                        continue
+
                     try:
                         formatted_name = self._format_name_output(surname_tokens, given_tokens)
                         return ParseResult.success_with_name(formatted_name)
@@ -989,6 +1109,31 @@ class ChineseNameDetector:
         scored_parses = []
         for surname_tokens, given_tokens in parses:
             score = self._calculate_parse_score(surname_tokens, given_tokens, tokens)
+
+            # Additional validation: reject parses where single letters are used as given names
+            # when there are multi-syllable alternatives available (likely Western names)
+            has_single_letter_given = any(len(token) == 1 for token in given_tokens)
+            has_multi_syllable_tokens = any(len(token) > 3 for token in tokens)
+
+            # Check if any multi-syllable token is a known Chinese surname
+            has_chinese_surname_in_tokens = any(
+                len(token) > 3
+                and (
+                    token.lower().replace(" ", "") in self._data.surnames
+                    or self._data_service._normalize_token(token).replace(" ", "") in self._data.surnames_normalized
+                )
+                for token in tokens
+            )
+
+            if (
+                has_single_letter_given
+                and has_multi_syllable_tokens
+                and score < -25.0
+                and not has_chinese_surname_in_tokens
+            ):
+                # This looks like a Western name where single letters are initials
+                continue
+
             if score > float("-inf"):
                 scored_parses.append((surname_tokens, given_tokens, score))
 
@@ -1026,13 +1171,20 @@ class ChineseNameDetector:
 
         # 2. Single-token surnames - only at beginning or end (contiguous sequences only)
         # Surname-first pattern: surname + given_names
-        if self._data_service._normalize_token(tokens[0]).replace(" ", "") in self._data.surnames_normalized:
+        # Check both original and normalized forms, but exclude single letters
+        if len(tokens[0]) > 1 and (  # Don't treat single letters as surnames
+            tokens[0].lower().replace(" ", "") in self._data.surnames
+            or self._data_service._normalize_token(tokens[0]).replace(" ", "") in self._data.surnames_normalized
+        ):
             parses.append(([tokens[0]], tokens[1:]))
 
         # Surname-last pattern: given_names + surname
-        if (
-            len(tokens) >= 2
-            and self._data_service._normalize_token(tokens[-1]).replace(" ", "") in self._data.surnames_normalized
+        if len(tokens) >= 2 and (
+            len(tokens[-1]) > 1  # Don't treat single letters as surnames
+            and (
+                tokens[-1].lower().replace(" ", "") in self._data.surnames
+                or self._data_service._normalize_token(tokens[-1]).replace(" ", "") in self._data.surnames_normalized
+            )
         ):
             parses.append(([tokens[-1]], tokens[:-1]))
 
@@ -1093,9 +1245,7 @@ class ChineseNameDetector:
             )
 
         given_logp_sum = sum(
-            self._data.given_log_probabilities.get(
-                self._data_service._normalize_token(g_token), self._config.default_given_logp
-            )
+            self._data.given_log_probabilities.get(self._given_name_key(g_token), self._config.default_given_logp)
             for g_token in given_tokens
         )
 
@@ -1112,12 +1262,26 @@ class ChineseNameDetector:
         return surname_logp + given_logp_sum + validation_penalty + compound_given_bonus + cultural_score
 
     def _surname_key(self, surname_tokens: List[str]) -> str:
-        """Convert surname tokens to lookup key."""
+        """Convert surname tokens to lookup key, preferring original form when available."""
         if len(surname_tokens) == 1:
+            # Try original form first (more likely to preserve correct romanization)
+            original_key = surname_tokens[0].lower().replace(" ", "")
+            if original_key in self._data.surname_frequencies:
+                return original_key
+            # Fall back to normalized form
             return self._data_service._normalize_token(surname_tokens[0]).replace(" ", "")
         else:
             # Compound surname - join with space
             return " ".join(self._data_service._normalize_token(t) for t in surname_tokens)
+
+    def _given_name_key(self, given_token: str) -> str:
+        """Convert given name token to lookup key, preferring original form when available."""
+        # Try original form first (more likely to preserve correct romanization)
+        original_key = given_token.lower().replace(" ", "")
+        if original_key in self._data.given_log_probabilities:
+            return original_key
+        # Fall back to normalized form
+        return self._data_service._normalize_token(given_token).lower().replace(" ", "")
 
     def _all_valid_given(self, given_tokens: List[str]) -> bool:
         """Check if all given name tokens are valid."""
@@ -1183,7 +1347,7 @@ class ChineseNameDetector:
             return -10.0
 
         score = 0.0
-        surname_key = " ".join(self._data_service._normalize_token(t) for t in surname_tokens)
+        surname_key = self._surname_key(surname_tokens)
 
         # Surname frequency bonus
         surname_freq = self._data.surname_frequencies.get(surname_key.replace(" ", ""), 0)
@@ -1275,14 +1439,35 @@ class ChineseNameDetector:
         # Capitalize each part properly, handling hyphens within parts
         formatted_parts = []
         for part in parts:
-            if "-" in part:
-                sub_parts = part.split("-")
+            # Clean up any leading/trailing hyphens that may have come from tokenization
+            clean_part = part.strip("-")
+            if not clean_part:  # Skip empty parts after stripping hyphens
+                continue
+
+            if "-" in clean_part:
+                sub_parts = clean_part.split("-")
                 formatted_part = "-".join(sub.capitalize() for sub in sub_parts)
                 formatted_parts.append(formatted_part)
             else:
-                formatted_parts.append(part.capitalize())
+                formatted_parts.append(clean_part.capitalize())
 
-        given_str = "-".join(formatted_parts)
+        # Determine separator based on part lengths
+        # Use spaces when we have mixed-length parts (some single chars, some multi-char)
+        if len(formatted_parts) > 1:
+            part_lengths = [
+                len(part.replace("-", "")) for part in formatted_parts
+            ]  # Count chars, ignoring internal hyphens
+            has_single_char = any(length == 1 for length in part_lengths)
+            has_multi_char = any(length > 1 for length in part_lengths)
+
+            if has_single_char and has_multi_char:
+                # Mixed lengths: use spaces (e.g., "Bin B" not "Bin-B")
+                given_str = " ".join(formatted_parts)
+            else:
+                # All same length category: use hyphens (e.g., "Yu-Ming" or "A-B")
+                given_str = "-".join(formatted_parts)
+        else:
+            given_str = formatted_parts[0] if formatted_parts else ""
 
         # Handle compound surnames properly
         if len(surname_tokens) > 1:
@@ -1450,6 +1635,13 @@ def run_all_tests() -> None:
         ("AuYeung Ka Ming", (True, "Ka-Ming Au Yeung")),  # Fused compound surname
         ("Teo Chee Hean", (True, "Chee-Hean Teo")),  # Hokkien/Teochew surname
         ("Goh Chok Tong", (True, "Chok-Tong Goh")),  # Hokkien/Teochew surname
+        # Newly fixed: Names with initials + Chinese surnames (previously failed due to Western name heuristic)
+        ("H Y Tiong", (True, "H-Y Tiong")),  # Hokkien/Teochew romanization of Tang (唐)
+        ("Z D Chen", (True, "Z-D Chen")),  # Chen is 5th most common surname
+        ("Y Z Wang", (True, "Y-Z Wang")),  # Wang is most common surname
+        ("H M Zhang", (True, "H-M Zhang")),  # Zhang is 3rd most common surname
+        ("P.Y. Huang", (True, "P-Y Huang")),  # Huang with periods in initials
+        ("D. W. Wang", (True, "D-W Wang")),  # Wang with periods in initials
         # Note: Khoo Swee Chiow fails because "Swee" not in given names database
     ]
 
@@ -1489,6 +1681,10 @@ def run_all_tests() -> None:
         "Vo Thanh Son",  # Vietnamese: surname + given patterns
         # Overlapping surname differentiation tests
         "Lim Hye-jin",  # Korean: overlapping surname + Korean given pattern
+        # Western names with initials (should not be confused with Chinese names)
+        "De Pace A",  # Italian surname with initial
+        "A. Rubin",  # Western initial + Jewish/Eastern European surname
+        "E. Moulin",  # French surname with initial
     ]
 
     print("Running Chinese name tests...")

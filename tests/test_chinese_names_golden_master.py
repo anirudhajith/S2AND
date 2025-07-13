@@ -3,6 +3,18 @@ Golden Master Test Suite for Chinese Names Refactoring
 
 This test captures the current behavior of the chinese_names module to ensure
 that refactoring doesn't change the public API behavior.
+
+Key fixes tested:
+- Tiered confidence system prevents Western name false positives (Julian Lee, Adrian Chen)
+- Cultural validation preserves legitimate Chinese names (Zixuan Wang)
+- Gold/Silver/Bronze standard classification for name component splitting
+- Western name pattern detection (specifically -ian endings without Chinese phonetics)
+
+Additional fixes in this version:
+- Missing syllable additions to PLAUSIBLE_COMPONENTS: "cong", "cuan", "bian", "cui"
+- Forbidden pattern logic fix: allows Chinese compounds like "Dongliang" while blocking Western names
+- Comprehensive coverage of real Chinese names to prevent future regressions
+- Enhanced Western name blocking to maintain precision
 """
 
 import sys
@@ -85,6 +97,7 @@ CHINESE_NAME_TEST_CASES = [
     ("Wei-min Zhang 张为民", (True, "Wei-Min Zhang")),
     ("Wei Min Zhang", (True, "Wei-Min Zhang")),
     ("Li Ming", (True, "Ming Li")),
+    ("Li Na", (True, "Na Li")),
     ("Xiao-Hong Li", (True, "Xiao-Hong Li")),
     ("Xiaohong Li", (True, "Xiao-Hong Li")),
     ("Xiaohong Li 张小红", (True, "Xiao-Hong Li")),
@@ -118,11 +131,11 @@ CHINESE_NAME_TEST_CASES = [
     ("Cheung Hok Yau", (True, "Hok-Yau Cheung")),
     ("Chow Yun Fat", (True, "Yun-Fat Chow")),
     ("Ng Man Tat", (True, "Man-Tat Ng")),
-    # ("Leung Chiu Wai", (True, "Chiu-Wai Leung")),
+    # ("Leung Chiu Wai", (True, "Chiu-Wai Leung")), # TODO
     ("Kwok Fu Shing", (True, "Fu-Shing Kwok")),
     ("Lam Ching Ying", (True, "Ching-Ying Lam")),
     ("Yeung Chin Wah", (True, "Chin-Wah Yeung")),
-    # ("Tsang Chi Wai", (True, "Chi-Wai Tsang")),
+    # ("Tsang Chi Wai", (True, "Chi-Wai Tsang")), # TODO
     ("Fung Hiu Man", (True, "Hiu-Man Fung")),
     ("Tse Ting Fung", (True, "Ting-Fung Tse")),
     ("Szeto Wah", (True, "Wah Szeto")),
@@ -154,8 +167,12 @@ CHINESE_NAME_TEST_CASES = [
     ("Lee Min", (True, "Min Lee")),
     ("Lee Jun", (True, "Jun Lee")),
     ("AuYeung Ka Ming", (True, "Ka-Ming Au Yeung")),
-    # ("Teo Chee Hean", (True, "Chee-Hean Teo")),
+    ("Teo Chee Hean", (True, "Chee-Hean Teo")),
     ("Goh Chok Tong", (True, "Chok-Tong Goh")),
+    # Phase 3 fixes - compound splitting enhancements
+    ("Li Zeze", (True, "Ze-Ze Li")),
+    ("Li Siran", (True, "Si-Ran Li")),
+    ("Chen Niran", (True, "Ni-Ran Chen")),
     # Names with initials + Chinese surnames
     ("H Y Tiong", (True, "H-Y Tiong")),
     ("Z D Chen", (True, "Z-D Chen")),
@@ -171,6 +188,68 @@ CHINESE_NAME_TEST_CASES = [
     # Additional Chinese names with compound syllables
     ("Lianhua Wang", (True, "Lian-Hua Wang")),
     ("Tianjian Li", (True, "Tian-Jian Li")),
+    # Session fixes - legitimate Chinese names that should be preserved
+    ("Zixuan Wang", (True, "Zi-Xuan Wang")),  # Should pass tiered confidence system
+    ("Weiming Zhang", (True, "Wei-Ming Zhang")),  # Gold standard (anchor + anchor)
+    # Missing syllable fixes - cases that required adding syllables to PLAUSIBLE_COMPONENTS
+    ("Congzuo Li", (True, "Cong-Zuo Li")),  # Added "cong" syllable
+    ("Ceyan Wang", (True, "Ce-Yan Wang")),  # Already worked
+    ("Suiluan Zhang", (True, "Sui-Luan Zhang")),  # Already worked
+    ("Maoqin Chen", (True, "Mao-Qin Chen")),  # Already worked
+    ("Chouzhe Liu", (True, "Chou-Zhe Liu")),  # Already worked
+    ("Cuanfen Xu", (True, "Cuan-Fen Xu")),  # Added "cuan" syllable
+    ("Weibian Zhao", (True, "Wei-Bian Zhao")),  # Added "bian" syllable
+    ("Haotian Zhang", (True, "Hao-Tian Zhang")),  # Already worked
+    ("Yidian Huang", (True, "Yi-Dian Huang")),  # Already worked
+    ("Cuihua Zhang", (True, "Cui-Hua Zhang")),  # Added "cui" syllable
+    # Forbidden pattern fix - cases that required fixing the forbidden pattern logic
+    ("Dongliang Xu", (True, "Dong-Liang Xu")),  # Fixed forbidden pattern "gl" blocking
+    # Additional real Chinese names to ensure comprehensive coverage
+    ("Xiuxian Zhang", (True, "Xiu-Xian Zhang")),
+    ("Chunfang Li", (True, "Chun-Fang Li")),
+    ("Guangming Wang", (True, "Guang-Ming Wang")),
+    ("Jianchun Liu", (True, "Jian-Chun Liu")),
+    ("Wenxuan Chen", (True, "Wen-Xuan Chen")),
+    ("Yongquan Zhou", (True, "Yong-Quan Zhou")),
+    ("Xuefeng Gao", (True, "Xue-Feng Gao")),
+    ("Zhenghua Yang", (True, "Zheng-Hua Yang")),
+    ("Meiling Wu", (True, "Mei-Ling Wu")),
+    ("Qiuying Zhang", (True, "Qiu-Ying Zhang")),
+    ("Ruigang Li", (True, "Rui-Gang Li")),
+    ("Shuangxi Wang", (True, "Shuang-Xi Wang")),
+    ("Tianhua Liu", (True, "Tian-Hua Liu")),
+    ("Xiaoqing Chen", (True, "Xiao-Qing Chen")),
+    ("Yuanfang Zhou", (True, "Yuan-Fang Zhou")),
+    ("Zhiyuan Yang", (True, "Zhi-Yuan Yang")),
+    ("Lingfeng Wu", (True, "Ling-Feng Wu")),
+    ("Baoguo Xu", (True, "Bao-Guo Xu")),
+    # Dynamic system test cases - previously problematic syllables now working
+    ("Li Qionghua", (True, "Qiong-Hua Li")),  # qiong syllable from givenname.csv
+    ("Chen Siming", (True, "Si-Ming Chen")),  # si syllable from givenname.csv
+    ("Liu Chuanyu", (True, "Chuan-Yu Liu")),  # chuan syllable from givenname.csv
+    ("Wu Leping", (True, "Le-Ping Wu")),  # le syllable from givenname.csv
+    ("Zhou Shuaibin", (True, "Shuai-Bin Zhou")),  # shuai syllable from givenname.csv
+    ("Huang Bihong", (True, "Bi-Hong Huang")),  # bi syllable from givenname.csv
+    ("Chen Cuanfen", (True, "Cuan-Fen Chen")),  # cuan syllable from manual supplement
+    ("Wang Dongliang", (True, "Dong-Liang Wang")),  # compound name with fixed forbidden pattern
+    ("Zhang Xiaoming", (True, "Xiao-Ming Zhang")),  # common name validation
+    ("Liu Hunyu", (True, "Hun-Yu Liu")),  # hun syllable from manual supplement
+    ("Wu Zabing", (True, "Za-Bing Wu")),  # za syllable from manual supplement
+    # High-frequency syllables from givenname.csv now included
+    ("Wang Zehua", (True, "Ze-Hua Wang")),  # ze syllable (4,513.6 ppm)
+    ("Zhang Chuan", (True, "Chuan Zhang")),  # chuan syllable (2,741.0 ppm)
+    ("Chen Leming", (True, "Le-Ming Chen")),  # le syllable (2,658.5 ppm)
+    ("Liu Shuai", (True, "Shuai Liu")),  # shuai syllable (1,977.2 ppm)
+    ("Wu Laiming", (True, "Lai-Ming Wu")),  # lai syllable (1,702.8 ppm)
+    ("Zhou Rundong", (True, "Run-Dong Zhou")),  # run syllable (1,645.9 ppm)
+    ("Huang Daoming", (True, "Dao-Ming Huang")),  # dao syllable (1,605.6 ppm)
+    ("Wang Huaiyu", (True, "Huai-Yu Wang")),  # huai syllable (1,587.0 ppm)
+    ("Zhang Hangfei", (True, "Hang-Fei Zhang")),  # hang syllable (1,552.8 ppm)
+    ("Li Wangming", (True, "Wang-Ming Li")),  # wang syllable (1,531.8 ppm)
+    ("Liu Zenghua", (True, "Zeng-Hua Liu")),  # zeng syllable (1,413.2 ppm)
+    ("Wu Cunming", (True, "Cun-Ming Wu")),  # cun syllable (1,319.0 ppm)
+    ("Zhou Kuihua", (True, "Kui-Hua Zhou")),  # kui syllable (1,293.5 ppm)
+    ("Huang Dingyu", (True, "Ding-Yu Huang")),  # ding syllable (1,180.0 ppm)
 ]
 
 # Non-Chinese names that should return False (failure reason varies)
@@ -210,9 +289,24 @@ NON_CHINESE_TEST_CASES = [
     "A. Rubin",
     "E. Moulin",
     # Session fixes - Western names with forbidden phonetic patterns
-    "Julian Lee",  # Contains "ian" pattern
+    "Julian Lee",  # Contains "ian" pattern - should be blocked by cultural validation
     "Christian Wong",  # Contains "ian" pattern
     "Adrian Liu",  # Contains "ian" pattern
+    "Adrian Chen",  # Contains "ian" pattern - should be blocked by cultural validation
+    "Brian Chen",  # Contains "br" + "ian" patterns
+    # Additional Western names ending in "-ian" that should be rejected
+    "Julian Smith",
+    "Adrian Brown",
+    "Christian Jones",
+    "Vivian White",
+    "Fabian Garcia",
+    "Damian Miller",
+    # Western names with forbidden patterns that should remain blocked
+    "Gloria Martinez",  # Contains "gl" pattern - should be blocked
+    "Glenn Johnson",  # Contains "gl" pattern - should be blocked
+    "Gloria Chen",  # Western name with Chinese surname - should be blocked
+    "Clara Wong",  # Contains "cl" pattern - should be blocked
+    "Frank Liu",  # Contains "fr" pattern - should be blocked
     "Brian Chen",  # Contains "br" + "ian" patterns
     # Additional Western names ending in "-ian" that should be rejected
     "Julian Smith",
@@ -291,6 +385,10 @@ def test_individual_cases(golden_master_tester):
         ("John Smith", (False, "no valid Chinese name structure found")),  # Western
         ("Chan Tai Man", (True, "Tai-Man Chan")),  # Cantonese from original
         ("Au-Yeung Ka-Ming", (True, "Ka-Ming Au Yeung")),  # Compound surname
+        # Session fixes - key test cases for our tiered confidence system
+        ("Julian Lee", (False, "surname not recognised")),  # Should be blocked by cultural validation
+        ("Adrian Chen", (False, "surname not recognised")),  # Should be blocked by cultural validation
+        ("Zixuan Wang", (True, "Zi-Xuan Wang")),  # Should pass - legitimate Chinese name
     ]
 
     for test_input, expected in test_cases:

@@ -377,6 +377,9 @@ SYLLABLE_RULES.update(
         "yung": "rong",  # 容 - matches CANTONESE_SURNAMES mapping
         "kut": "qu",  # 屈 - matches CANTONESE_SURNAMES mapping
         "seung": "song",  # 宋 - matches CANTONESE_SURNAMES mapping
+        # Hokkien/Teochew romanization mappings
+        "chee": "qi",  # 智/齐 - Hokkien/Teochew romanization
+        "hean": "xian",  # 贤/先 - Hokkien/Teochew romanization
     }
 )
 
@@ -695,7 +698,6 @@ KOREAN_ONLY_SURNAMES = frozenset(
         "son",
         "an",
         "oh",
-        "na",
         "go",
         "roh",
     }
@@ -797,6 +799,7 @@ OVERLAPPING_KOREAN_SURNAMES = frozenset(
         "jo",  # Alternative romanization of 조
         "song",  # 송/宋 - Common in both
         "ho",  # 호/何 - Korean Ho, Chinese He
+        "na",  # 나/娜/那 - Korean surname, also Chinese surname and given name
     }
 )
 
@@ -1096,6 +1099,81 @@ FORBIDDEN_PHONETIC_PATTERNS = frozenset(
         "sion",  # Version, Mission (though these are unlikely in names)
     }
 )
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TIERED CONFIDENCE SETS FOR GIVEN NAME SPLITTING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Tier 1: High-Confidence Anchors. A small set of the ~60 most common and
+# statistically significant given name syllables. Their presence is a strong
+# signal that a split is legitimate.
+HIGH_CONFIDENCE_ANCHORS = frozenset(
+    {
+        "wei",
+        "jing",
+        "li",
+        "ming",
+        "hui",
+        "yan",
+        "yu",
+        "xiao",
+        "jun",
+        "hong",
+        "hua",
+        "jie",
+        "ping",
+        "fang",
+        "ying",
+        "lan",
+        "na",
+        "qiang",
+        "min",
+        "lin",
+        "bin",
+        "bo",
+        "chen",
+        "cheng",
+        "chun",
+        "dan",
+        "dong",
+        "feng",
+        "gang",
+        "guo",
+        "hai",
+        "hao",
+        "jian",
+        "jia",
+        "jin",
+        "kai",
+        "kun",
+        "lei",
+        "liang",
+        "ling",
+        "long",
+        "mei",
+        "peng",
+        "qing",
+        "rong",
+        "rui",
+        "shan",
+        "sheng",
+        "tao",
+        "ting",
+        "wen",
+        "xiang",
+        "xin",
+        "xiu",
+        "xue",
+        "yang",
+        "yi",
+        "yong",
+        "zhen",
+        "zhi",
+        "zhong",
+        "zhu",
+    }
+)
+
 
 # Japanese surnames (most common ones)
 JAPANESE_SURNAMES = frozenset(

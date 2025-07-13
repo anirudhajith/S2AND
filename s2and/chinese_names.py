@@ -607,11 +607,6 @@ class DataInitializationService:
         # Combine all sources: givenname.csv + manual supplements
         plausible_components = frozenset(given_names.union(manual_supplements))
 
-        # print out which of the manual supplements are actually in the given names before being added
-        for supplement in manual_supplements:
-            if supplement not in given_names:
-                print(f"Manual supplement '{supplement}' is not in given names data, will be added")
-
         return frozenset(given_names), given_log_probabilities, plausible_components
 
     def _build_compound_hyphen_map(self, compound_surnames: FrozenSet[str]) -> Dict[str, str]:
@@ -835,7 +830,7 @@ class ChineseNameDetector:
             if parse_result.success:
                 return parse_result
 
-        return ParseResult.failure("surname not recognised")
+        return ParseResult.failure("name not recognised as Chinese")
 
     def _preprocess_input(self, raw: str) -> str:
         """Preprocess input string to clean up punctuation and formatting."""
@@ -940,8 +935,6 @@ class ChineseNameDetector:
     def _single_pass_ethnicity_check(self, tokens: Tuple[str, ...]) -> ParseResult:
         """
         Simplified Chinese vs non-Chinese classification.
-
-        We don't care about distinguishing Korean from Vietnamese - just Chinese vs not-Chinese.
         """
         if not tokens:
             return ParseResult.success_with_name("")
@@ -949,6 +942,11 @@ class ChineseNameDetector:
         # Prepare expanded keys for pattern matching
         original_keys = [self._remove_spaces(t.lower()) for t in tokens]
         expanded_keys = [part for key in original_keys for part in ([key] + (key.split("-") if "-" in key else []))]
+
+        # Quick Western name check - catch obvious cases early
+        for key in expanded_keys:
+            if key in WESTERN_NAMES:
+                return ParseResult.failure("appears to be Western name")
 
         # Simple scoring: non-Chinese evidence vs Chinese evidence
         non_chinese_score = 0.0
@@ -1475,13 +1473,6 @@ class ChineseNameDetector:
 
         # If both parts are very rare (below -12), it's suspicious
         if freq_a < -12.0 and freq_b < -12.0:
-            return False
-
-        # 3. Western name pattern detection: consolidated patterns that are almost never Chinese
-        original_lower = original_token.lower()
-
-        # Check if name is a known Western name
-        if original_lower in WESTERN_NAMES:
             return False
 
         return True

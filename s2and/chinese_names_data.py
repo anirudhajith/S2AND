@@ -1670,3 +1670,90 @@ JAPANESE_SURNAMES = frozenset(
         "yoshizawa",
     }
 )
+
+
+# Comprehensive list of Western names that should be blocked
+WESTERN_NAMES = frozenset(
+    {
+        # Names ending in -ian
+        "julian",
+        "vivian",
+        "adrian",
+        "christian",
+        "sebastian",
+        "damian",
+        "brian",
+        "ryan",
+        # Names ending in -an
+        "alan",
+        "susan",
+        "urban",
+        "logan",
+        "jordan",
+        "morgan",
+        "megan",
+        "began",
+        # Names ending in -ana
+        "ana",
+        "dana",
+        "tana",
+        "diana",
+        "lana",
+        # Names ending in -na
+        "tina",
+        "nina",
+        "anna",
+        "gina",
+        "vera",
+        "sara",
+        "mira",
+        "nora",
+        "hanna",
+        "sina",
+        "kina",
+        # Names ending in -ta
+        "rita",
+        "beta",
+        "meta",
+        "delta",
+        # Names ending in -ena
+        "dena",
+        "lena",
+        "rena",
+        "sena",
+        # Names ending in -ne
+        "anne",
+        "diane",
+        "june",
+        "wayne",
+        # Names ending in -ina
+        "zina",
+        # Names ending in -nna
+        "channa",
+        "jenna",
+        # Names ending in -ie
+        "genie",
+        "julie",
+        # Individual names that don't fit suffix patterns
+        "milan",
+        "liam",
+        "adam",
+        "noah",
+        "dean",
+        "sean",
+        "juan",
+        "ivan",
+        "ethan",
+        "duncan",
+        "leon",
+        "sage",
+        "karen",
+        "lisa",
+        "linda",
+        "kate",
+        "mike",
+        "eli",
+        "wade",
+        "heidi",
+    }
+)

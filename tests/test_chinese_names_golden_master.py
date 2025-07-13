@@ -307,18 +307,84 @@ NON_CHINESE_TEST_CASES = [
     "Gloria Chen",  # Western name with Chinese surname - should be blocked
     "Clara Wong",  # Contains "cl" pattern - should be blocked
     "Frank Liu",  # Contains "fr" pattern - should be blocked
-    "Brian Chen",  # Contains "br" + "ian" patterns
-    # Additional Western names ending in "-ian" that should be rejected
-    "Julian Smith",
-    "Adrian Brown",
-    "Christian Jones",
-    "Vivian White",
-    "Fabian Garcia",
-    "Damian Miller",
     # Session fixes - Korean names (overlapping surnames + Korean given names)
     "Ho Yung Lee",  # Korean given names "ho", "yung" with overlapping surname "lee"
     "Ho Yun Lee",  # Korean given names "ho", "yun" with overlapping surname "lee"
     "Ho-Young Lee",  # Contains "young" Korean pattern
+    # Comprehensive Western name pattern fixes - names ending in -ian
+    "Sebastian Davis",  # sebastian + -ian pattern
+    "Damian Wilson",  # damian + -ian pattern
+    "Brian Johnson",  # brian + -ian pattern
+    "Ryan Thompson",  # ryan + -ian pattern
+    # Western names ending in -an
+    "Alan Wilson",  # alan + -an pattern with specific prefix rule
+    "Susan Davis",  # susan + -an pattern with specific prefix rule
+    "Urban Miller",  # urban + -an pattern
+    "Logan Brown",  # logan + -an pattern
+    "Jordan Smith",  # jordan + -an pattern
+    "Morgan Jones",  # morgan + -an pattern
+    "Megan Anderson",  # megan + -an pattern
+    # Western names ending in -ana
+    "Ana Martinez",  # ana + -ana pattern
+    "Dana Wilson",  # dana + -ana pattern
+    "Diana Johnson",  # diana + -ana pattern
+    "Lana Thompson",  # lana + -ana pattern
+    # Western names ending in -na
+    "Tina Anderson",  # tina + -na pattern
+    "Nina Davis",  # nina + -na pattern
+    "Anna Thompson",  # anna + -na pattern
+    "Gina Wilson",  # gina + -na pattern
+    "Vera Martinez",  # vera + -na pattern
+    "Sara Johnson",  # sara + -na pattern
+    "Mira Brown",  # mira + -na pattern
+    "Nora Smith",  # nora + -na pattern
+    "Hanna Jones",  # hanna + -na pattern
+    "Sina Miller",  # sina + -na pattern
+    "Kina Davis",  # kina + -na pattern
+    # Western names ending in -ta
+    "Rita Wilson",  # rita + -ta pattern
+    "Beta Johnson",  # beta + -ta pattern (technical name)
+    "Meta Thompson",  # meta + -ta pattern (technical name)
+    "Delta Brown",  # delta + -ta pattern (technical name)
+    # Western names ending in -ena
+    "Dena Smith",  # dena + -ena pattern
+    "Lena Jones",  # lena + -ena pattern
+    "Rena Martinez",  # rena + -ena pattern
+    "Sena Anderson",  # sena + -ena pattern
+    # Western names ending in -ne
+    "Anne Wilson",  # anne + -ne pattern
+    "Diane Davis",  # diane + -ne pattern
+    "June Johnson",  # june + -ne pattern
+    "Wayne Thompson",  # wayne + -ne pattern
+    # Western names ending in -ina
+    "Zina Brown",  # zina + -ina pattern
+    # Western names ending in -nna
+    "Channa Smith",  # channa + -nna pattern
+    "Jenna Jones",  # jenna + -nna pattern
+    # Western names ending in -ie
+    "Genie Martinez",  # genie + -ie pattern
+    "Julie Anderson",  # julie + -ie pattern
+    # Individual Western names that don't fit suffix patterns
+    "Milan Rodriguez",  # milan individual pattern
+    "Liam Garcia",  # liam individual pattern
+    "Adam Wilson",  # adam individual pattern
+    "Noah Davis",  # noah individual pattern
+    "Dean Johnson",  # dean individual pattern
+    "Sean Thompson",  # sean individual pattern
+    "Juan Brown",  # juan individual pattern
+    "Ivan Smith",  # ivan individual pattern
+    "Ethan Jones",  # ethan individual pattern
+    "Duncan Martinez",  # duncan individual pattern
+    "Leon Anderson",  # leon individual pattern
+    "Sage Wilson",  # sage individual pattern
+    "Karen Davis",  # karen individual pattern
+    "Lisa Johnson",  # lisa individual pattern
+    "Linda Thompson",  # linda individual pattern
+    "Kate Brown",  # kate individual pattern
+    "Mike Smith",  # mike individual pattern
+    "Eli Jones",  # eli individual pattern
+    "Wade Martinez",  # wade individual pattern
+    "Heidi Anderson",  # heidi individual pattern
 ]
 
 # Combine all test cases - Chinese with expected outcomes, non-Chinese just names

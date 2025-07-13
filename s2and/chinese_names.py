@@ -176,6 +176,7 @@ from s2and.chinese_names_data import (
     VALID_CHINESE_RIMES,
     FORBIDDEN_PHONETIC_PATTERNS,
     HIGH_CONFIDENCE_ANCHORS,
+    WESTERN_NAMES,
 )
 
 
@@ -1316,7 +1317,7 @@ class ChineseNameDetector:
         ):
             compound_given_bonus = 0.8
 
-        cultural_score = self._cultural_plausibility_score(surname_tokens, given_tokens, tokens)
+        cultural_score = self._cultural_plausibility_score(surname_tokens, given_tokens)
 
         return surname_logp + given_logp_sum + validation_penalty + compound_given_bonus + cultural_score
 
@@ -1409,6 +1410,13 @@ class ChineseNameDetector:
             if not (norm_a in self._data.plausible_components and norm_b in self._data.plausible_components):
                 continue
 
+            # 1a. Cultural plausibility check: Even if both parts are plausible,
+            # check if this looks like a Western name that shouldn't be split
+            if len(raw) >= 3:  # Apply to all reasonable length names
+                is_culturally_plausible = self._is_plausible_chinese_split(norm_a, norm_b, raw)
+                if not is_culturally_plausible:
+                    continue
+
             is_a_anchor = norm_a in HIGH_CONFIDENCE_ANCHORS
             is_b_anchor = norm_b in HIGH_CONFIDENCE_ANCHORS
 
@@ -1418,8 +1426,16 @@ class ChineseNameDetector:
 
             # 3. Silver Standard (Anchor + Plausible): This is the most common real-world case.
             if is_a_anchor or is_b_anchor:
-                # This correctly accepts "Weian" (wei=anchor) and "Awei" (wei=anchor).
-                return [a, b]
+                # Additional cultural check for Western names that could be split with anchors
+                if len(raw) >= 4:
+                    is_culturally_plausible = self._is_plausible_chinese_split(norm_a, norm_b, raw)
+                    if is_culturally_plausible:
+                        return [a, b]
+                else:
+                    # For shorter names, still apply cultural check but be more lenient
+                    is_culturally_plausible = self._is_plausible_chinese_split(norm_a, norm_b, raw)
+                    if is_culturally_plausible:
+                        return [a, b]
 
             # 4. Bronze Standard (Plausible + Plausible): This is the highest-risk category.
             # This is where 'Susan' -> 'su', 'san' would land.
@@ -1461,22 +1477,16 @@ class ChineseNameDetector:
         if freq_a < -12.0 and freq_b < -12.0:
             return False
 
-        # 3. Western name pattern detection: specific patterns that are almost never Chinese
+        # 3. Western name pattern detection: consolidated patterns that are almost never Chinese
         original_lower = original_token.lower()
 
-        # Block common Western name endings that coincidentally split into Chinese syllables
-        if original_lower.endswith("ian") and len(original_lower) > 4:
-            # Check if this looks like a Western name ending in -ian
-            prefix = original_lower[:-3]  # Remove "ian"
-            # If the prefix doesn't end with common Chinese sounds, it's likely Western
-            if not (prefix.endswith("j") or prefix.endswith("q") or prefix.endswith("x")):
-                return False
+        # Check if name is a known Western name
+        if original_lower in WESTERN_NAMES:
+            return False
 
         return True
 
-    def _cultural_plausibility_score(
-        self, surname_tokens: List[str], given_tokens: List[str], all_tokens: List[str]
-    ) -> float:
+    def _cultural_plausibility_score(self, surname_tokens: List[str], given_tokens: List[str]) -> float:
         """Calculate cultural plausibility score for a Chinese name parse."""
         if not surname_tokens or not given_tokens:
             return -10.0

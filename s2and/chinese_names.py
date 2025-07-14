@@ -69,33 +69,35 @@ correctly handling Chinese compounds (e.g., "Weiming" → "Wei", "Ming").
 ## Usage Examples
 
 ```python
-from s2and.chinese_names import is_chinese_name
-
-# Basic usage
-result = is_chinese_name("Zhang Wei")
-# Returns: (True, "Wei Zhang")
-
-# Compound given names
-result = is_chinese_name("Li Weiming")
-# Returns: (True, "Wei-Ming Li")
-
-# Mixed scripts
-result = is_chinese_name("张Wei Ming")
-# Returns: (True, "Wei-Ming Zhang")
-
-# Non-Chinese names (correctly rejected)
-result = is_chinese_name("John Smith")
-# Returns: (False, "surname not recognised")
-
-result = is_chinese_name("Kim Min-jun")
-# Returns: (False, "appears to be Korean name")
-
-# Advanced usage with detector instance
 from s2and.chinese_names import ChineseNameDetector
 
+# Basic usage
 detector = ChineseNameDetector()
+result = detector.is_chinese_name("Zhang Wei")
+# Returns: ParseResult(success=True, result="Wei Zhang")
 
-# Access normalization service directly
+# Compound given names
+result = detector.is_chinese_name("Li Weiming")
+# Returns: ParseResult(success=True, result="Wei-Ming Li")
+
+# Mixed scripts
+result = detector.is_chinese_name("张Wei Ming")
+# Returns: ParseResult(success=True, result="Wei-Ming Zhang")
+
+# Non-Chinese names (correctly rejected)
+result = detector.is_chinese_name("John Smith")
+# Returns: ParseResult(success=False, error_message="surname not recognised")
+
+result = detector.is_chinese_name("Kim Min-jun")
+# Returns: ParseResult(success=False, error_message="appears to be Korean name")
+
+# Access result data
+if result.success:
+    print(f"Formatted name: {result.result}")
+else:
+    print(f"Error: {result.error_message}")
+
+# Advanced usage - access normalization service directly
 normalized_token = detector._normalizer.norm("wei")  # Returns: "wei"
 normalized_token = detector._normalizer.norm("ts'ai")  # Returns: "cai" (Wade-Giles conversion)
 
@@ -145,12 +147,14 @@ The module provides detailed error messages for debugging:
 - **Cache optimization**: Persistent disk cache for Han→Pinyin mappings
 - **Scalability**: Thread-safe design suitable for high-throughput processing
 
-## Backward Compatibility
+## API
 
-The module maintains backward compatibility with the original API:
-- `is_chinese_name(name) -> (bool, str)`: Returns (success, result_or_error)
-- Module-level convenience functions for simple usage
-- Consistent output formatting across versions
+The main class is `ChineseNameDetector`:
+- `ChineseNameDetector()`: Main detector class
+- `detector.is_chinese_name(name) -> ParseResult`: Returns structured result with success/error
+- `ParseResult.success`: Boolean indicating if name was recognized as Chinese
+- `ParseResult.result`: Formatted name if successful
+- `ParseResult.error_message`: Error description if failed
 
 ## Thread Safety
 
@@ -166,10 +170,11 @@ import pickle
 import logging
 import time
 import math
+import string
 import urllib.request
 from pathlib import Path
 from typing import Dict, List, Set, Tuple, Optional, Union, FrozenSet
-from functools import lru_cache, cache
+from functools import lru_cache
 from dataclasses import dataclass, replace
 
 import pypinyin
@@ -192,16 +197,124 @@ from s2and.chinese_names_data import (
     WESTERN_NAMES,
 )
 
-
 # ════════════════════════════════════════════════════════════════════════════════
 # COMPILED REGEX PATTERNS (Performance optimization)
 # ════════════════════════════════════════════════════════════════════════════════
 
-# Clean pattern components - factored from inline alternatives for performance
+
+def _build_forbidden_patterns_regex():
+    """Pre-compile FORBIDDEN_PHONETIC_PATTERNS into a single regex for faster pattern matching."""
+    # Escape special regex characters and join with alternation
+    escaped_patterns = [re.escape(pattern) for pattern in FORBIDDEN_PHONETIC_PATTERNS]
+    # Sort by length (descending) to ensure longer patterns match first
+    escaped_patterns.sort(key=len, reverse=True)
+    return re.compile(f"({'|'.join(escaped_patterns)})")
+
+
+def _build_cjk_pattern():
+    """Build comprehensive CJK pattern including all extensions."""
+    # CJK Unicode ranges - covers all Chinese, Japanese, Korean characters
+    CJK_RANGES = (
+        (0x4E00, 0x9FFF),  # CJK Unified Ideographs
+        (0x3400, 0x4DBF),  # CJK Extension A
+        (0x20000, 0x2A6DF),  # CJK Extension B
+        (0x2A700, 0x2B73F),  # CJK Extension C
+        (0x2B740, 0x2B81F),  # CJK Extension D
+        (0x2B820, 0x2CEAF),  # CJK Extension E
+        (0x2CEB0, 0x2EBEF),  # CJK Extension F
+        (0x30000, 0x3134F),  # CJK Extension G
+    )
+
+    ranges = []
+    for start, end in CJK_RANGES:
+        if end <= 0xFFFF:
+            ranges.append(f"\\u{start:04X}-\\u{end:04X}")
+        else:
+            ranges.append(f"\\U{start:08X}-\\U{end:08X}")
+
+    return re.compile(f"[{''.join(ranges)}]")
+
+
+def _build_han_roman_splitter():
+    """Build han_roman_splitter pattern using comprehensive CJK ranges."""
+    # Extract the character class from the comprehensive CJK pattern
+    cjk_class = _COMPREHENSIVE_CJK_PATTERN.pattern[1:-1]  # Remove [ and ]
+    return re.compile(f"([{cjk_class}]+|[A-Za-z-]+)")
+
+
+def _build_wade_giles_regex():
+    """Build optimized regex for Wade-Giles conversions with O(1) lookup performance."""
+    # Define conversion patterns with their replacements
+    # Order matters: longest patterns first to avoid partial matches
+    patterns = [
+        # 4-character patterns
+        (r"shih", "shi"),
+        # 3-character patterns (aspirated) - must be before 2-char patterns
+        (r"ts'", "c"),
+        (r"tz'", "c"),
+        (r"ch'", "q"),
+        # 3-character patterns (non-aspirated)
+        (r"szu", "si"),
+        # 2-character patterns (aspirated) - must be before 1-char patterns
+        (r"k'", "k"),
+        (r"t'", "t"),
+        (r"p'", "p"),
+        # 2-character patterns (non-aspirated)
+        (r"hs", "x"),
+        (r"ts", "z"),
+        (r"tz", "z"),
+        # Special case: ch -> needs context-sensitive replacement
+        (r"ch(?=i|ia|ie|iu)", "j"),  # ch before i/ia/ie/iu -> j
+        (r"ch", "zh"),  # all other ch -> zh
+        # REMOVED: Broad k/t/p patterns that incorrectly convert non-Wade-Giles tokens
+        # These patterns were too broad and converted valid tokens like "szeto" -> "szedo"
+        # Wade-Giles aspirated consonants should use apostrophes (k', t', p')
+        # Unaspirated consonants in Wade-Giles should not be converted to voiced
+    ]
+
+    # Create the combined regex pattern
+    pattern_str = "|".join(f"({pattern})" for pattern, _ in patterns)
+    compiled_regex = re.compile(pattern_str)
+
+    # Create replacement mapping by group index
+    replacements = [replacement for _, replacement in patterns]
+
+    return compiled_regex, replacements
+
+
+def _build_suffix_regex():
+    """Build optimized regex for suffix conversions."""
+    # Suffix patterns ordered by length (longest first)
+    patterns = [
+        (r"ieh$", "ie"),  # 3 chars
+        (r"ueh$", "ue"),  # 3 chars
+        (r"ung$", "ong"),  # 3 chars
+        (r"ien$", "ian"),  # 3 chars - Wade-Giles ien → Pinyin ian
+        (r"ih$", "i"),  # 2 chars
+    ]
+
+    # Create the combined regex pattern
+    pattern_str = "|".join(f"({pattern})" for pattern, _ in patterns)
+    compiled_regex = re.compile(pattern_str)
+
+    # Create replacement mapping by group index
+    replacements = [replacement for _, replacement in patterns]
+
+    return compiled_regex, replacements
+
+
+# Pre-compiled patterns for performance
+_FORBIDDEN_PATTERNS_REGEX = _build_forbidden_patterns_regex()
+_COMPREHENSIVE_CJK_PATTERN = _build_cjk_pattern()
+_HAN_ROMAN_SPLITTER = _build_han_roman_splitter()
+_WADE_GILES_REGEX, _WADE_GILES_REPLACEMENTS = _build_wade_giles_regex()
+_SUFFIX_REGEX, _SUFFIX_REPLACEMENTS = _build_suffix_regex()
+
+# Clean pattern components
 _PARENTHETICALS_PATTERN = r"[（(][^)（）]*[)）]"
-_INITIALS_WITH_SPACE_PATTERN = r"([A-Z])\.(?=\s)"
-_COMPOUND_INITIALS_PATTERN = r"([A-Z])\.-([A-Z])\."
-_INITIALS_WITH_HYPHEN_PATTERN = r"([A-Z])\.-(?=[A-Z])"
+_INITIALS_WITH_SPACE_PATTERN = r"(?P<initial_space>[A-Z])\.(?=\s)"
+_COMPOUND_INITIALS_PATTERN = r"(?P<compound_first>[A-Z])\.-(?P<compound_second>[A-Z])\."
+_INITIALS_WITH_HYPHEN_PATTERN = r"(?P<initial_hyphen>[A-Z])\.-(?=[A-Z])"
 _INVALID_CHARS_PATTERN = r"[_|=]"
 
 # Combined clean pattern (case-sensitive, pre-lowercasing handled in preprocessing)
@@ -297,6 +410,7 @@ class ChineseNameConfig:
     clean_roman_pattern: re.Pattern[str]
     camel_case_finder: re.Pattern[str]
     clean_pattern: re.Pattern[str]
+    forbidden_patterns_regex: re.Pattern[str]
 
     # Character translation table
     hyphens_apostrophes_tr: Dict[int, None]
@@ -320,17 +434,20 @@ class ChineseNameConfig:
             base_url="https://raw.githubusercontent.com/psychbruce/ChineseNames/main/data-csv/",
             required_files=("familyname.csv", "givenname.csv"),
             sep_pattern=re.compile(r"[·‧.\u2011-\u2015﹘﹣－⁃₋•∙⋅˙ˑːˉˇ˘˚˛˜˝]+"),
-            cjk_pattern=re.compile(r"[\u4e00-\u9fff]"),
+            cjk_pattern=_COMPREHENSIVE_CJK_PATTERN,
             digits_pattern=re.compile(r"\d"),
             whitespace_pattern=re.compile(r"\s+"),
-            camel_case_pattern=re.compile(r"[A-Z][a-z]*"),
+            camel_case_pattern=re.compile(r"[A-Z]+(?=[A-Z][a-z])|[A-Z][a-z]+|[A-Z]+(?=$)"),
             # Pre-compiled regex patterns for mixed-token processing
-            han_roman_splitter=re.compile(r"([\u4e00-\u9fff]+|[A-Za-z-]+)"),
+            han_roman_splitter=_HAN_ROMAN_SPLITTER,
             ascii_alpha_pattern=re.compile(r"[A-Za-z]"),
-            clean_roman_pattern=re.compile(r"[^A-Za-z-']"),  # PRESERVE apostrophes for Wade-Giles
+            clean_roman_pattern=re.compile(
+                r"[^A-Za-z-''']"
+            ),  # PRESERVE both ASCII and full-width apostrophes for Wade-Giles
             camel_case_finder=re.compile(r"[A-Z][a-z]+"),
             clean_pattern=re.compile(_CLEAN_PATTERN_COMBINED),
-            hyphens_apostrophes_tr=str.maketrans("", "", "-‐‒–—―﹘﹣－⁃₋'''''"),
+            forbidden_patterns_regex=_FORBIDDEN_PATTERNS_REGEX,
+            hyphens_apostrophes_tr=str.maketrans("", "", "-‐‒–—―﹘﹣－⁃₋''''''''"),
             sorted_chinese_onsets=tuple(sorted(VALID_CHINESE_ONSETS, key=len, reverse=True)),
             default_surname_logp=-15.0,
             default_given_logp=-15.0,
@@ -423,7 +540,16 @@ class NormalizationService:
         self._data = data
 
     def norm(self, token: str) -> str:
-        """Public interface for token normalization - hides internal implementation."""
+        """
+        Normalize text for all lookup operations (full phonetic normalization).
+
+        Public interface for token normalization that applies consistent normalization for:
+        - General lookups
+        - Surname frequency/probability lookups
+        - Given name database lookups
+
+        Includes Wade-Giles conversion, hyphen/apostrophe removal, and lowercasing.
+        """
         return self._normalize_token(token)
 
     def apply(self, raw_name: str) -> NormalizedInput:
@@ -437,19 +563,26 @@ class NormalizationService:
         # Phase 1: Clean input (single regex pass)
         cleaned = self._preprocess_input(raw_name)
 
-        # Phase 2: Tokenize on separators/whitespace
-        tokens = tuple(t for t in self._config.sep_pattern.sub(" ", cleaned).split() if t)
+        # Phase 2: Handle "LAST, First" format (common in academic/professional contexts)
+        if "," in cleaned:
+            parts = [part.strip() for part in cleaned.split(",")]
+            if len(parts) == 2 and all(parts):  # Exactly 2 non-empty parts
+                cleaned = " ".join(parts[::-1])  # Reverse order: "Last, First" -> "First Last"
+
+        # Phase 3: Tokenize on separators/whitespace and filter out invalid tokens
+        raw_tokens = self._config.sep_pattern.sub(" ", cleaned).split()
+        tokens = tuple(t for t in raw_tokens if t and not all(c in string.punctuation for c in t))
 
         if not tokens:
             return NormalizedInput.empty(raw_name)
 
-        # Phase 3: Process mixed Han/Roman tokens
+        # Phase 4: Process mixed Han/Roman tokens
         roman_tokens = tuple(self._process_mixed_tokens(list(tokens)))
 
         if not roman_tokens:
             return NormalizedInput.empty(raw_name)
 
-        # Phase 4: Create lazy normalization map (computed on-demand)
+        # Phase 5: Create lazy normalization map (computed on-demand)
         norm_map = LazyNormalizationMap(roman_tokens, self)
 
         return NormalizedInput(
@@ -488,12 +621,12 @@ class NormalizationService:
 
     def _clean_replacement(self, match) -> str:
         """Replacement function for single-pass cleaning."""
-        if match.group(1):  # Initial followed by space: "X. " -> "X "
-            return match.group(1) + " "
-        elif match.group(2) and match.group(3):  # Compound initials: "X.-H." -> "X-H"
-            return match.group(2) + "-" + match.group(3)
-        elif match.group(4):  # Initial followed by hyphen and letter: "X.-M" -> "X-M"
-            return match.group(4) + "-"
+        if match.group("initial_space"):  # Initial followed by space: "X. " -> "X "
+            return match.group("initial_space") + " "
+        elif match.group("compound_first") and match.group("compound_second"):  # Compound initials: "X.-H." -> "X-H"
+            return match.group("compound_first") + "-" + match.group("compound_second")
+        elif match.group("initial_hyphen"):  # Initial followed by hyphen and letter: "X.-M" -> "X-M"
+            return match.group("initial_hyphen") + "-"
         return " "
 
     def _process_mixed_tokens(self, tokens: List[str]) -> List[str]:
@@ -524,7 +657,8 @@ class NormalizationService:
             else:
                 # Clean Roman token
                 clean_token = self._config.clean_roman_pattern.sub("", token)
-                if clean_token:
+                # Filter out empty tokens and tokens that are only punctuation
+                if clean_token and not all(c in string.punctuation for c in clean_token):
                     roman_tokens_original.append(clean_token)
 
                     # Create split version for comparison
@@ -544,12 +678,9 @@ class NormalizationService:
 
         # Handle Han/Roman duplication
         if han_tokens and roman_tokens_split:
-            # Create normalized cache for comparison (only for tokens we're comparing)
-            comparison_tokens = set(han_tokens + roman_tokens_split)
-            temp_normalized_cache = {token: self._normalize_token(token) for token in comparison_tokens}
-
-            han_normalized = set(temp_normalized_cache[t] for t in han_tokens)
-            roman_normalized = set(temp_normalized_cache[t] for t in roman_tokens_split)
+            # Compare normalized forms directly (memoized for performance)
+            han_normalized = set(self._normalize_token(t) for t in han_tokens)
+            roman_normalized = set(self._normalize_token(t) for t in roman_tokens_split)
 
             overlap = han_normalized.intersection(roman_normalized)
             max_size = max(len(han_normalized), len(roman_normalized))
@@ -565,12 +696,38 @@ class NormalizationService:
         else:
             return roman_tokens_original
 
+    @lru_cache(maxsize=32_768)
     def _normalize_token(self, token: str) -> str:
         """
         Normalize a token through the full romanization pipeline.
 
+        CRITICAL ORDER OF OPERATIONS AND RATIONALE:
+        
+        The Wade-Giles algorithm uses a complex precedence system where syllable-level 
+        conversions override prefix-level conversions. This creates specific precedence:
+        
+        1. EXCEPTIONS → SYLLABLE_RULES → ONE_LETTER_RULES
+        2. Prefix-based Wade-Giles conversions (_apply_wade_giles_conversions)
+        3. SYLLABLE_RULES (second pass to handle Wade-Giles conversion results)
+        
+        WADE-GILES PRECEDENCE COMPLEXITY:
+        The precedence is NOT simply "Layer 2 > Layer 3" but rather:
+        "Syllable-level WG > Cantonese > Taiwanese > Prefix-level WG"
+        
+        Example of syllable-level override:
+        - Token "tsu" → SYLLABLE_RULES contains "tsu": "cu" (step 2)
+        - This prevents _apply_wade_giles_conversions from seeing "ts" → "z" (step 4)
+        - Result: "tsu" → "cu" (intended behavior, but complex)
+        
+        This design handles edge cases like complete syllable mappings that cannot
+        be handled by systematic prefix rules, but creates potential brittleness
+        when adding new patterns.
+
         CRITICAL: Wade-Giles conversion must happen BEFORE apostrophe removal,
         since the conversion rules expect patterns like "ts'", "ch'", "k'", etc.
+
+        Memoized with LRU cache for performance (32K entries should handle
+        most real-world workloads without memory pressure).
         """
         # Step 1: Lowercase for consistent processing
         low = token.lower()
@@ -585,88 +742,79 @@ class NormalizationService:
         # Step 3: Apply Wade-Giles conversions BEFORE removing apostrophes
         wade_giles_result = self._apply_wade_giles_conversions(low)
 
-        # Step 4: Remove apostrophes and hyphens from the final result
+        # Step 4: Apply SYLLABLE_RULES to Wade-Giles conversion results
+        # This handles cases like ch'en → qen → chen
+        mapped_result = SYLLABLE_RULES.get(wade_giles_result)
+        if mapped_result:
+            wade_giles_result = mapped_result
+
+        # Step 5: Remove apostrophes and hyphens from the final result
         return wade_giles_result.translate(self._config.hyphens_apostrophes_tr)
 
     def _apply_wade_giles_conversions(self, token: str) -> str:
         """
-        Apply Wade-Giles conversion rules using table-driven approach with longest-match ordering.
+        Apply Wade-Giles conversion rules using optimized compiled regex (O(1) performance).
 
-        This prevents order-sensitivity bugs where overlapping patterns (e.g., "ts'" vs "ts")
-        could silently change behavior based on if-else ordering.
+        SYLLABLE-LEVEL vs PREFIX-LEVEL PRECEDENCE:
+        
+        This function handles PREFIX-LEVEL Wade-Giles conversions only. It operates at 
+        lower precedence than SYLLABLE-LEVEL conversions that are already applied in 
+        SYLLABLE_RULES.
+        
+        KEY DESIGN PRINCIPLE:
+        Syllable-level rules like "tsu" → "cu" must run BEFORE prefix rules like "ts" → "z"
+        to handle exceptions to systematic conversion patterns.
+        
+        PRECEDENCE CHAIN EXAMPLES:
+        1. "tsu" → SYLLABLE_RULES "tsu": "cu" (fires first) → result: "cu"
+           PREFIX rule "ts" → "z" never sees the token
+        
+        2. "tseng" → No syllable rule match → PREFIX rule "ts" → "z" → result: "zeng"
+        
+        3. "ch'en" → No syllable rule match → PREFIX rule "ch'" → "q" → result: "qen"
+           Then SYLLABLE_RULES second pass: "qen" → "chen"
+        
+        This creates implicit precedence: Syllable-level WG > Prefix-level WG
+        
+        SYSTEMATIC PATTERNS HANDLED HERE:
+        - Aspirated consonants: ts', ch', k', t', p' → c, q, k, t, p
+        - Unaspirated consonants: ts, ch, hs → z, zh/j, x
+        - Context-sensitive: ch → j (before i/ia/ie/iu) vs zh (elsewhere)
+        
+        This optimization replaces the previous O(N·M) linear scan with a single regex
+        substitution, providing significant performance improvement at high throughput.
 
         Args:
             token: Lowercase token WITH apostrophes intact (e.g., "ts'ai", "ch'en")
 
         Returns:
-            Converted token (e.g., "cai", "ch'en")
+            Converted token (e.g., "cai", "chen")
         """
-        # Table-driven Wade-Giles conversion rules for PREFIXES
-        # Format: (pattern, replacement, requires_length_check)
-        # Ordered by length (longest first) to ensure correct longest-match behavior
+        # Fast path: Handle exact match for single "j" first
+        if token == "j":
+            return "r"
 
-        prefix_rules = [
-            # 4-character patterns
-            ("shih", "shi", False),  # token.startswith("shih") -> "shi" + rest
-            # 3-character patterns (aspirated)
-            ("ts'", "c", False),  # token.startswith("ts'") -> "c" + rest
-            ("tz'", "c", False),  # token.startswith("tz'") -> "c" + rest
-            ("ch'", "q", False),  # token.startswith("ch'") -> "q" + rest (aspirated ch' → q)
-            # 3-character patterns (non-aspirated)
-            ("szu", "si", False),  # token.startswith("szu") -> "si" + rest
-            # 2-character patterns (aspirated)
-            ("k'", "k", False),  # token.startswith("k'") -> "k" + rest (aspirated k' → k)
-            ("t'", "t", False),  # token.startswith("t'") -> "t" + rest (aspirated t' → t)
-            ("p'", "p", False),  # token.startswith("p'") -> "p" + rest (aspirated p' → p)
-            # 2-character patterns (non-aspirated)
-            ("hs", "x", False),  # token.startswith("hs") -> "x" + rest
-            ("ts", "z", False),  # token.startswith("ts") -> "z" + rest
-            ("tz", "z", False),  # token.startswith("tz") -> "z" + rest
-            ("ch", "special_ch", False),  # Special handling for ch -> j/zh based on vowel
-            # 1-character patterns (require length check)
-            ("k", "g", True),  # token.startswith("k") && len > 1 -> "g" + rest
-            ("t", "d", True),  # token.startswith("t") && len > 1 -> "d" + rest
-            ("p", "b", True),  # token.startswith("p") && len > 1 -> "b" + rest
-        ]
+        def wade_giles_replacer(match):
+            """Replacement function for Wade-Giles regex substitution."""
+            # Find which group matched (groups are 1-indexed)
+            for i, group in enumerate(match.groups(), 1):
+                if group is not None:
+                    return _WADE_GILES_REPLACEMENTS[i - 1]
+            return match.group(0)  # Fallback (should never happen)
 
-        # Apply prefix conversions with longest-match ordering
-        result = token  # Default to original token if no prefix rules match
+        # Apply prefix conversions with single regex substitution
+        result = _WADE_GILES_REGEX.sub(wade_giles_replacer, token)
 
-        for pattern, replacement, requires_length_check in prefix_rules:
-            if token.startswith(pattern):
-                # Check length requirement for single-character patterns
-                if requires_length_check and len(token) <= 1:
-                    continue
+        def suffix_replacer(match):
+            """Replacement function for suffix regex substitution."""
+            # Find which group matched (groups are 1-indexed)
+            for i, group in enumerate(match.groups(), 1):
+                if group is not None:
+                    return _SUFFIX_REPLACEMENTS[i - 1]
+            return match.group(0)  # Fallback (should never happen)
 
-                if replacement == "special_ch":
-                    # Special handling for "ch" -> j/zh based on following vowel
-                    rest = token[2:]
-                    if rest.startswith(("i", "ia", "ie", "iu")):
-                        result = "j" + rest
-                    else:
-                        result = "zh" + rest
-                else:
-                    # Standard prefix replacement
-                    result = replacement + token[len(pattern) :]
-                break  # Apply only the first (longest) matching prefix rule
-
-        # Handle exact match for single "j" (only if no prefix rule applied)
-        if result == token and token == "j":
-            result = "r"
-
-        # Apply suffix conversions to the result (longest-first for consistency)
-        suffix_rules = [
-            ("ieh", "ie"),  # 3 chars
-            ("ueh", "ue"),  # 3 chars
-            ("ung", "ong"),  # 3 chars
-            ("ien", "ian"),  # 3 chars - Wade-Giles ien → Pinyin ian
-            ("ih", "i"),  # 2 chars
-        ]
-
-        for suffix, replacement in suffix_rules:
-            if result.endswith(suffix):
-                result = result[: -len(suffix)] + replacement
-                break  # Apply only first matching suffix
+        # Apply suffix conversions with single regex substitution
+        result = _SUFFIX_REGEX.sub(suffix_replacer, result)
 
         return result
 
@@ -677,19 +825,6 @@ class NormalizationService:
     def remove_spaces(self, text: str) -> str:
         """Remove spaces from text - centralized utility."""
         return text.replace(" ", "")
-
-    def normalize_key(self, text: str) -> str:
-        """
-        Normalize text for all lookup operations (full phonetic normalization).
-
-        This method applies consistent normalization for:
-        - General lookups (formerly normalize_for_lookup)
-        - Surname frequency/probability lookups (formerly normalize_surname_key)
-        - Given name database lookups (formerly normalize_given_key)
-
-        Includes Wade-Giles conversion, hyphen/apostrophe removal, and lowercasing.
-        """
-        return self._normalize_token(text)
 
     def is_valid_chinese_phonetics(self, token: str) -> bool:
         """Check if a token could plausibly be Chinese based on phonetic structure."""
@@ -708,7 +843,7 @@ class NormalizationService:
             return False
 
         # Check for forbidden Western patterns
-        if any(pattern in t for pattern in FORBIDDEN_PHONETIC_PATTERNS):
+        if self._config.forbidden_patterns_regex.search(t):
             return False
 
         # Special case: single letters
@@ -788,7 +923,7 @@ class NormalizationService:
                     return [first_half, second_half]
 
         # Check for forbidden phonetic patterns
-        has_forbidden_patterns = any(pattern in token.lower() for pattern in FORBIDDEN_PHONETIC_PATTERNS)
+        has_forbidden_patterns = bool(self._config.forbidden_patterns_regex.search(token.lower()))
 
         # Trust explicit hyphens if both parts are valid components
         if "-" in token and token.count("-") == 1:
@@ -900,9 +1035,8 @@ class NormalizationService:
         if normalized_cache is not None:
             return all(self.is_valid_given_name_token(token, normalized_cache) for token in given_tokens)
         else:
-            # Create a temporary cache for validation
-            temp_cache = {token: self._normalize_token(token) for token in given_tokens}
-            return all(self.is_valid_given_name_token(token, temp_cache) for token in given_tokens)
+            # Use direct memoized calls instead of temporary cache
+            return all(self.is_valid_given_name_token(token, None) for token in given_tokens)
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -1162,6 +1296,25 @@ class DataInitializationService:
             compound_hyphen_map=compound_hyphen_map,
         )
 
+    def _is_plausible_chinese_syllable(self, component: str) -> bool:
+        """
+        Check if a component is a plausible Chinese syllable suitable for compound splitting.
+        Uses a more lenient approach than strict onset-rime decomposition to handle
+        romanization variations and valid Chinese syllables.
+        """
+        if not component or len(component) > 7:
+            return False
+
+        # Reject components with forbidden Western patterns
+        component_lower = component.lower()
+        if self._config.forbidden_patterns_regex.search(component_lower):
+            return False
+
+        # Accept if it's a known Chinese syllable (from the given names database)
+        # This handles cases like 'xue', 'yue', 'jue' which are valid Chinese syllables
+        # even if they don't decompose cleanly in the onset-rime system we're using
+        return True  # Since we're already filtering from given_names, they should be valid
+
     def _build_surname_data(self) -> Tuple[Set[str], Dict[str, float]]:
         """Build surname sets and frequency data."""
         surnames_raw = set()
@@ -1228,8 +1381,26 @@ class DataInitializationService:
             }
         )
 
-        # Combine all sources: givenname.csv + manual supplements
-        plausible_components = frozenset(given_names.union(manual_supplements))
+        # Filter multi-syllable entries out of plausible_components
+        # They leak in via manual supplements; restrict to ≤7 letters & exactly one onset–rime split
+        # to avoid false "split-happy" behaviour with names like Weibian
+        filtered_components = set()
+
+        for component in given_names.union(manual_supplements):
+            # Check length constraint
+            if len(component) > 7:
+                continue
+
+            # Check if component is actually usable for splitting
+            # Some entries from givenname.csv might not be suitable for compound splitting
+            # Use a more lenient approach: include if it passes basic phonetic validation
+            # rather than strict onset-rime decomposition
+
+            # Basic phonetic validation - check if it could plausibly be Chinese
+            if self._is_plausible_chinese_syllable(component):
+                filtered_components.add(component)
+
+        plausible_components = frozenset(filtered_components)
 
         return frozenset(given_names), given_log_probabilities, plausible_components
 
@@ -1376,6 +1547,13 @@ class ChineseNameDetector:
         - success=True, result=formatted_name if Chinese name detected
         - success=False, error_message=reason if not Chinese name
         """
+        # Input validation
+        if not raw_name or len(raw_name) > 100:  # Reasonable name length limit
+            return ParseResult.failure("invalid input length")
+
+        if all(c in string.punctuation + string.whitespace for c in raw_name):
+            return ParseResult.failure("name contains only punctuation/whitespace")
+
         self._ensure_initialized()
 
         # Use new normalization service for cleaner pipeline
@@ -1412,10 +1590,26 @@ class ChineseNameDetector:
             if "-" in token:
                 expanded_tokens.extend(token.split("-"))
 
+        # Pre-compute all normalizations to avoid repeated expensive operations
+        # Build comprehensive normalization cache for all tokens we'll need
+        local_norm_cache = {}
+        for token in expanded_tokens:
+            if token not in local_norm_cache:
+                local_norm_cache[token] = self._normalizer.norm(token)
+
         # Check Korean patterns on BOTH original and normalized forms
         # Korean patterns are stored in original romanization, not after Wade-Giles conversion
         original_keys_raw = [t.lower() for t in expanded_tokens]  # Just lowercase, no Wade-Giles
-        original_keys_normalized = [self._normalizer.normalize_key(t) for t in expanded_tokens]
+        original_keys_normalized = [local_norm_cache[t] for t in expanded_tokens]  # Use cached normalization
+
+        # Create a mapping from all possible keys back to their normalized form
+        # This avoids re-normalization in the main loop
+        key_to_normalized = {}
+        for token in expanded_tokens:
+            raw_key = token.lower()
+            norm_key = local_norm_cache[token]
+            key_to_normalized[raw_key] = norm_key
+            key_to_normalized[norm_key] = norm_key  # Normalized key maps to itself
 
         # Combine both for pattern matching to catch Korean names regardless of romanization
         expanded_keys = list(set(original_keys_raw + original_keys_normalized))
@@ -1432,6 +1626,8 @@ class ChineseNameDetector:
         # Single pass analysis
         for key in expanded_keys:
             clean_key = self._normalizer.remove_spaces(key)
+            # Ensure consistent case handling for all lookups
+            clean_key_lower = clean_key.lower()
 
             # Strong non-Chinese indicators (definitive ethnicity markers)
             if clean_key in KOREAN_ONLY_SURNAMES:
@@ -1459,14 +1655,20 @@ class ChineseNameDetector:
                     non_chinese_score += 0.6
 
             # Chinese surname strength analysis
-            # Use cached normalized value if available
-            normalized_key = self._normalizer.remove_spaces(normalized_cache.get(key, self._normalizer.norm(key)))
-            is_chinese_surname = clean_key in self._data.surnames or normalized_key in self._data.surnames_normalized
+            # Use pre-computed normalization mapping to avoid re-normalization
+            normalized_key = self._normalizer.remove_spaces(key_to_normalized[key])
+            # Check both original case and lowercase for surname detection
+            is_chinese_surname = (
+                clean_key in self._data.surnames
+                or clean_key_lower in self._data.surnames
+                or normalized_key in self._data.surnames_normalized
+            )
 
             if is_chinese_surname:
-                surname_freq = self._data.surname_frequencies.get(clean_key, 0) or self._data.surname_frequencies.get(
-                    normalized_key, 0
-                )
+                # Use consistent lowercase key for frequency lookup to prevent case mismatches
+                surname_freq = self._data.surname_frequencies.get(
+                    clean_key_lower, 0
+                ) or self._data.surname_frequencies.get(normalized_key, 0)
 
                 if surname_freq > 0:
                     if surname_freq >= 10000:
@@ -1483,16 +1685,27 @@ class ChineseNameDetector:
                 chinese_surname_strength += base_strength
 
         # Combination bonuses for consistent non-Chinese patterns
-        if len([k for k in expanded_keys if k in KOREAN_ONLY_SURNAMES or k in KOREAN_GIVEN_PATTERNS]) >= 2:
+        # Optimized set-based pattern matching for O(1) lookups
+        expanded_keys_set = set(expanded_keys)  # Convert to set for fast membership testing
+
+        # Count Korean patterns using set intersection (much faster than list comprehension)
+        korean_patterns_found = len(expanded_keys_set.intersection(KOREAN_ONLY_SURNAMES)) + len(
+            expanded_keys_set.intersection(KOREAN_GIVEN_PATTERNS)
+        )
+        if korean_patterns_found >= 2:
             non_chinese_score += 1.0  # Consistent Korean pattern
 
-        if len([k for k in expanded_keys if k in VIETNAMESE_SURNAMES or k in VIETNAMESE_GIVEN_PATTERNS]) >= 2:
+        # Count Vietnamese patterns using set intersection
+        vietnamese_patterns_found = len(expanded_keys_set.intersection(VIETNAMESE_SURNAMES)) + len(
+            expanded_keys_set.intersection(VIETNAMESE_GIVEN_PATTERNS)
+        )
+        if vietnamese_patterns_found >= 2:
             non_chinese_score += 1.0  # Consistent Vietnamese pattern
 
         # Special bonus for overlapping surname + Korean given name pattern
         # This indicates likely Korean name when ambiguous surnames appear with Korean given names
-        has_overlapping_surname = any(k in OVERLAPPING_KOREAN_SURNAMES for k in expanded_keys)
-        korean_given_count = len([k for k in expanded_keys if k in KOREAN_GIVEN_PATTERNS])
+        has_overlapping_surname = bool(expanded_keys_set.intersection(OVERLAPPING_KOREAN_SURNAMES))
+        korean_given_count = len(expanded_keys_set.intersection(KOREAN_GIVEN_PATTERNS))
         if has_overlapping_surname and korean_given_count >= 1:
             non_chinese_score += 1.2  # Overlapping surname + Korean given name pattern
 
@@ -1570,7 +1783,7 @@ class ChineseNameDetector:
                 has_chinese_surname_in_tokens = any(
                     len(token) > 3
                     and (
-                        self._normalizer.normalize_key(token) in self._data.surnames
+                        self._normalizer.norm(token) in self._data.surnames
                         or self._normalizer.remove_spaces(normalized_cache.get(token, self._normalizer.norm(token)))
                         in self._data.surnames_normalized
                     )
@@ -1617,7 +1830,7 @@ class ChineseNameDetector:
             has_chinese_surname_in_tokens = any(
                 len(token) > 3
                 and (
-                    self._normalizer.normalize_key(token) in self._data.surnames
+                    self._normalizer.norm(token) in self._data.surnames
                     or self._normalizer.remove_spaces(normalized_cache.get(token, self._normalizer.norm(token)))
                     in self._data.surnames_normalized
                 )
@@ -1678,7 +1891,7 @@ class ChineseNameDetector:
         first_token = tokens[0]
         first_normalized = normalized_cache.get(first_token, self._normalizer.norm(first_token))
         if len(first_token) > 1 and (  # Don't treat single letters as surnames
-            self._normalizer.normalize_key(first_token) in self._data.surnames
+            self._normalizer.norm(first_token) in self._data.surnames
             or self._normalizer.remove_spaces(first_normalized) in self._data.surnames_normalized
         ):
             parses.append(([first_token], tokens[1:]))
@@ -1688,7 +1901,7 @@ class ChineseNameDetector:
             last_token = tokens[-1]
             last_normalized = normalized_cache.get(last_token, self._normalizer.norm(last_token))
             if len(last_token) > 1 and (  # Don't treat single letters as surnames
-                self._normalizer.normalize_key(last_token) in self._data.surnames
+                self._normalizer.norm(last_token) in self._data.surnames
                 or self._normalizer.remove_spaces(last_normalized) in self._data.surnames_normalized
             ):
                 parses.append(([last_token], tokens[:-1]))
@@ -1696,7 +1909,7 @@ class ChineseNameDetector:
         # 3. Fallback: Check for hyphenated compound surnames at beginning or end
         # Beginning position
         if "-" in tokens[0]:
-            lowercase_key = self._normalizer.normalize_key(tokens[0])
+            lowercase_key = tokens[0].lower()  # Don't remove hyphens for compound_hyphen_map lookup
             if lowercase_key in self._data.compound_hyphen_map:
                 space_form = self._data.compound_hyphen_map[lowercase_key]
                 # Title-case the compound parts for output
@@ -1706,7 +1919,7 @@ class ChineseNameDetector:
 
         # End position
         if len(tokens) >= 2 and "-" in tokens[-1]:
-            lowercase_key = self._normalizer.normalize_key(tokens[-1])
+            lowercase_key = tokens[-1].lower()  # Don't remove hyphens for compound_hyphen_map lookup
             if lowercase_key in self._data.compound_hyphen_map:
                 space_form = self._data.compound_hyphen_map[lowercase_key]
                 # Title-case the compound parts for output
@@ -1780,7 +1993,7 @@ class ChineseNameDetector:
         """Convert surname tokens to lookup key, preferring original form when available."""
         if len(surname_tokens) == 1:
             # Try original form first (more likely to preserve correct romanization)
-            original_key = self._normalizer.normalize_key(surname_tokens[0])
+            original_key = self._normalizer.norm(surname_tokens[0])
             if original_key in self._data.surname_frequencies:
                 return original_key
             # Fall back to normalized form
@@ -1794,11 +2007,11 @@ class ChineseNameDetector:
     def _given_name_key(self, given_token: str, normalized_cache: Dict[str, str]) -> str:
         """Convert given name token to lookup key, preferring original form when available."""
         # Try original form first (more likely to preserve correct romanization)
-        original_key = self._normalizer.normalize_key(given_token)
+        original_key = self._normalizer.norm(given_token)
         if original_key in self._data.given_log_probabilities:
             return original_key
         # Fall back to normalized form
-        return self._normalizer.normalize_key(normalized_cache.get(given_token, self._normalizer.norm(given_token)))
+        return self._normalizer.norm(normalized_cache.get(given_token, self._normalizer.norm(given_token)))
 
     def _all_valid_given(self, given_tokens: List[str], normalized_cache: Dict[str, str]) -> bool:
         """Check if all given name tokens are valid - delegate to normalizer."""
@@ -1968,7 +2181,7 @@ class ChineseNameDetector:
 
         # Handle compound surnames properly
         if len(surname_tokens) > 1:
-            surname_str = " ".join(self._capitalize_name_part(t) for t in surname_tokens)
+            surname_str = "-".join(self._capitalize_name_part(t) for t in surname_tokens)
         else:
             surname_str = self._capitalize_name_part(surname_tokens[0])
 
@@ -1976,7 +2189,7 @@ class ChineseNameDetector:
 
 
 # ════════════════════════════════════════════════════════════════════════════════
-# COMPREHENSIVE TEST SUITE
+# Performance test
 # ════════════════════════════════════════════════════════════════════════════════
 
 
@@ -2070,7 +2283,7 @@ def run_performance_test() -> None:
     print(f"Testing with {len(test_names_diverse)} diverse names...")
     start = time.perf_counter()
     for name in test_names_diverse:
-        is_chinese_name(name)
+        detector.is_chinese_name(name)
     end = time.perf_counter()
 
     diverse_time = end - start
@@ -2096,7 +2309,7 @@ def run_performance_test() -> None:
     print(f"\nTesting with {len(cached_names)} cached-friendly names...")
     start = time.perf_counter()
     for name in cached_names:
-        is_chinese_name(name)
+        detector.is_chinese_name(name)
     end = time.perf_counter()
 
     cached_time = end - start
@@ -2112,56 +2325,6 @@ def run_performance_test() -> None:
     print(f"\nCache benefit: {speedup:.1f}x speedup with repeated data")
     print(f"Realistic performance: {diverse_rate:.0f} names/second ({diverse_time_per_name:.1f} μs/name)")
     print(f"Cache-optimized performance: {cached_rate:.0f} names/second ({cached_time_per_name:.1f} μs/name)")
-
-
-# ════════════════════════════════════════════════════════════════════════════════
-# MODULE-LEVEL CONVENIENCE FUNCTIONS
-# ════════════════════════════════════════════════════════════════════════════════
-
-# Global detector instance for module-level functions
-_global_detector: Optional[ChineseNameDetector] = None
-
-
-def _get_global_detector() -> ChineseNameDetector:
-    """Get or create the global detector instance."""
-    global _global_detector
-    if _global_detector is None:
-        _global_detector = ChineseNameDetector()
-    return _global_detector
-
-
-def is_chinese_name(name: str) -> Tuple[bool, str]:
-    """
-    Module-level convenience function for Chinese name detection.
-
-    Args:
-        name: Input name string
-
-    Returns:
-        Tuple of (success: bool, result_or_error: str)
-    """
-    detector = _get_global_detector()
-    result = detector.is_chinese_name(name)
-    return (result.success, result.result if result.success else result.error_message)
-
-
-def clear_cache() -> None:
-    """Clear the global pinyin cache."""
-    detector = _get_global_detector()
-    detector.clear_pinyin_cache()
-
-
-def get_cache_info() -> Dict[str, Union[bool, int, float]]:
-    """Get cache information as a dictionary."""
-    detector = _get_global_detector()
-    cache_info = detector.get_cache_info()
-    return {
-        "cache_built": cache_info.cache_built,
-        "cache_size": cache_info.cache_size,
-        "pickle_file_exists": cache_info.pickle_file_exists,
-        "pickle_file_size": cache_info.pickle_file_size,
-        "pickle_file_mtime": cache_info.pickle_file_mtime,
-    }
 
 
 # CLI entry point

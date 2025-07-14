@@ -20,13 +20,13 @@ Additional fixes in this version:
 import sys
 import pickle
 from pathlib import Path
-from typing import Dict, Tuple, Any
+from typing import Dict, Tuple
 import pytest
 
 # Add the parent directory to path to import s2and
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from s2and.chinese_names import is_chinese_name
+from s2and.chinese_names import ChineseNameDetector
 
 
 class GoldenMasterTester:
@@ -34,14 +34,16 @@ class GoldenMasterTester:
 
     def __init__(self):
         self.golden_file = Path(__file__).parent / "golden_master_chinese_names.pkl"
+        self.detector = ChineseNameDetector()
 
     def capture_golden_master(self, test_cases: list[str]) -> Dict[str, Tuple[bool, str]]:
         """Capture the current behavior as golden master."""
         results = {}
         for test_case in test_cases:
             try:
-                result = is_chinese_name(test_case)
-                results[test_case] = result
+                result = self.detector.is_chinese_name(test_case)
+                # Convert ParseResult to tuple format for compatibility
+                results[test_case] = (result.success, result.result if result.success else result.error_message)
             except Exception as e:
                 results[test_case] = (False, f"Exception: {str(e)}")
         return results
@@ -116,6 +118,14 @@ CHINESE_NAME_TEST_CASES = [
     ("Yu Murong", (True, "Yu Murong")),
     ("Tsai Yu", (True, "Yu Tsai")),
     ("Yu Tsai", (True, "Yu Tsai")),
+    # Full-width apostrophe handling (Asian keyboard input)
+    ("Ts'ao Ming", (True, "Ming Ts'ao")),  # Full-width apostrophe: preserves Wade-Giles form
+    ("Ch'en Wei", (True, "Wei Ch'en")),  # Ch'en → qen → chen via Wade-Giles + SYLLABLE_RULES
+    ("K'ung Fu", (True, "Fu K'ung")),  # Full-width apostrophe: preserves Wade-Giles form
+    ("T'ang Li", (True, "Li T'ang")),  # Full-width apostrophe: preserves Wade-Giles form
+    ("P'eng Yu", (True, "Yu P'eng")),  # Full-width apostrophe: preserves Wade-Giles form
+    # Mixed apostrophe types (should work consistently)
+    ("Ts'ao Ts'ai", (True, "Ts'ai Ts'ao")),  # Mixed ASCII and full-width apostrophes
     ("Chao（冯超） Feng", (True, "Chao Feng")),
     ("Chen-Hung Huang", (True, "Chen-Hung Huang")),
     ("Cheng-Hung Huang", (True, "Cheng-Hung Huang")),
@@ -144,7 +154,7 @@ CHINESE_NAME_TEST_CASES = [
     ("Ka Fai Lee", (True, "Ka-Fai Lee")),
     ("Chan Tai-Man", (True, "Tai-Man Chan")),
     ("Wong Kit", (True, "Kit Wong")),
-    ("Au Yeung Chun", (True, "Chun Au Yeung")),
+    ("Au Yeung Chun", (True, "Chun Au-Yeung")),
     # Edge cases
     ("A. I. Lee", (True, "A-I Lee")),
     ("Wei Wei", (True, "Wei Wei")),
@@ -152,7 +162,7 @@ CHINESE_NAME_TEST_CASES = [
     ("Chen Chen Yu", (True, "Chen-Yu Chen")),
     ("Wang Li Ming", (True, "Li-Ming Wang")),
     ("Chung Ming Wang", (True, "Chung-Ming Wang")),
-    ("Au-Yeung Ka-Ming", (True, "Ka-Ming Au Yeung")),
+    ("Au-Yeung Ka-Ming", (True, "Ka-Ming Au-Yeung")),
     ("Li.Wei.Zhang", (True, "Li-Wei Zhang")),
     ("Xiao Ming-hui Li", (True, "Xiao-Ming-Hui Li")),
     ("Ma Long", (True, "Long Ma")),
@@ -166,7 +176,6 @@ CHINESE_NAME_TEST_CASES = [
     # Edge case fixes
     ("Lee Min", (True, "Min Lee")),
     ("Lee Jun", (True, "Jun Lee")),
-    ("AuYeung Ka Ming", (True, "Ka-Ming Au Yeung")),
     ("Teo Chee Hean", (True, "Chee-Hean Teo")),
     ("Goh Chok Tong", (True, "Chok-Tong Goh")),
     # Phase 3 fixes - compound splitting enhancements
@@ -248,8 +257,34 @@ CHINESE_NAME_TEST_CASES = [
     ("Li Wangming", (True, "Wang-Ming Li")),  # wang syllable (1,531.8 ppm)
     ("Liu Zenghua", (True, "Zeng-Hua Liu")),  # zeng syllable (1,413.2 ppm)
     ("Wu Cunming", (True, "Cun-Ming Wu")),  # cun syllable (1,319.0 ppm)
+    # Regression test for section 3 compound hyphen processing (GitHub issue: normalize_key bug)
+    ("Ou-Yang Wei Ming", (True, "Wei-Ming Ou-Yang")),  # Tests that hyphenated compounds expand correctly
+    ("Si-Ma Qian Feng", (True, "Qian-Feng Si-Ma")),  # Tests section 3 vs section 2 parse generation
+    ("AuYeung Ka Ming", (True, "Ka-Ming Au-Yeung")),
     ("Zhou Kuihua", (True, "Kui-Hua Zhou")),  # kui syllable (1,293.5 ppm)
     ("Huang Dingyu", (True, "Ding-Yu Huang")),  # ding syllable (1,180.0 ppm)
+    # Comma-separated "LAST, First" format tests (academic/professional contexts)
+    ("Wei, Yu-Zhong", (True, "Yu-Zhong Wei")),
+    ("Liu, Dehua", (True, "De-Hua Liu")),
+    ("Zhang, Wei", (True, "Wei Zhang")),
+    ("Chen, Yu", (True, "Yu Chen")),
+    ("Wang, Li Ming", (True, "Li-Ming Wang")),
+    ("Ouyang, Xiaoming", (True, "Xiao-Ming Ouyang")),
+    ("Wong, Siu Ming", (True, "Siu-Ming Wong")),
+    ("Chan, Tai Man", (True, "Tai-Man Chan")),
+    ("Au-Yeung, Ka-Ming", (True, "Ka-Ming Au-Yeung")),
+    ("Choi, Suk-Zan", (True, "Suk-Zan Choi")),
+    # Test with extra whitespace (should be handled gracefully)
+    ("Wei,   Yu-Zhong", (True, "Yu-Zhong Wei")),
+    ("Liu,Dehua", (True, "De-Hua Liu")),  # No space after comma
+    ("  Zhang  ,  Wei  ", (True, "Wei Zhang")),  # Extra whitespace
+    # Test cases for compound splitting after plausible_components filtering (Concern 1)
+    ("Zhang Xuefeng", (True, "Xue-Feng Zhang")),  # Tests 'xue' syllable preserved in plausible_components
+    ("Liu Yuehua", (True, "Yue-Hua Liu")),  # Tests 'yue' syllable preserved
+    ("Chen Jueming", (True, "Jue-Ming Chen")),  # Tests 'jue' syllable preserved
+    ("Wu Kuaile", (True, "Kuai-Le Wu")),  # Tests 'kuai' syllable preserved
+    ("Wang Shuaiming", (True, "Shuai-Ming Wang")),  # Tests 'shuai' syllable preserved
+    ("Li Hualiang", (True, "Hua-Liang Li")),  # Tests compound splitting still works
 ]
 
 # Non-Chinese names that should return False (failure reason varies)
@@ -385,6 +420,20 @@ NON_CHINESE_TEST_CASES = [
     "Eli Jones",  # eli individual pattern
     "Wade Martinez",  # wade individual pattern
     "Heidi Anderson",  # heidi individual pattern
+    # Comma-separated non-Chinese names (should still be rejected)
+    "Smith, John",
+    "Garcia, Maria",
+    "Johnson, Brian",
+    "Brown, Adrian",
+    "Soo, Kim Min",  # Korean name in comma format
+    "Anh, Nguyen Van",  # Vietnamese name in comma format
+    "Martinez, Gloria",  # Western name with forbidden "gl" pattern
+    # Test cases for Korean overlap case sensitivity (Concern 2) - different cases should all be rejected
+    "Ho Yung lee",  # Lowercase lee with Korean context - should be rejected
+    "Ho Yung LEE",  # Uppercase LEE with Korean context - should be rejected
+    # Additional cases to ensure consistent Korean detection regardless of case
+    "Min Soo LEE",  # Uppercase LEE
+    "Jin Ho lee",  # Lowercase lee
 ]
 
 # Combine all test cases - Chinese with expected outcomes, non-Chinese just names
@@ -401,14 +450,17 @@ def test_chinese_names_with_expected_results(golden_master_tester):
     """Test Chinese names with their expected exact outputs."""
     passed = 0
     failed = 0
+    detector = ChineseNameDetector()
 
     for input_name, expected in CHINESE_NAME_TEST_CASES:
-        result = is_chinese_name(input_name)
-        if result == expected:
+        result = detector.is_chinese_name(input_name)
+        # Convert ParseResult to tuple format for comparison
+        result_tuple = (result.success, result.result if result.success else result.error_message)
+        if result_tuple == expected:
             passed += 1
         else:
             failed += 1
-            print(f"FAILED: '{input_name}': expected {expected}, got {result}")
+            print(f"FAILED: '{input_name}': expected {expected}, got {result_tuple}")
 
     assert failed == 0, f"Chinese name tests: {failed} failures out of {len(CHINESE_NAME_TEST_CASES)} tests"
     print(f"Chinese name tests: {passed} passed, {failed} failed")
@@ -416,8 +468,10 @@ def test_chinese_names_with_expected_results(golden_master_tester):
 
 def test_non_chinese_names_should_fail():
     """Test that non-Chinese names are correctly rejected."""
+    detector = ChineseNameDetector()
+
     for input_name in NON_CHINESE_TEST_CASES:
-        result = is_chinese_name(input_name)
-        assert result[0] is False, f"Failed for '{input_name}': expected False, got {result[0]}"
+        result = detector.is_chinese_name(input_name)
+        assert result.success is False, f"Failed for '{input_name}': expected False, got {result.success}"
 
     print(f"Non-Chinese name tests: {len(NON_CHINESE_TEST_CASES)} passed")

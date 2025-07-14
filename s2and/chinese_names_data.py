@@ -319,6 +319,9 @@ WADE_GILES_SYLLABLE_RULES = {
     "hsi": "xi",  # For Hsi-men -> Xi-men (西门)
     "chü": "ju",  # For compound surnames with ü
     "yü": "yu",  # For Yü-ch'ih -> Yu-chi (尉迟)
+    "lü": "lu",  # Wade-Giles lü -> Pinyin lu (吕/绿/律)
+    "lüe": "lue",  # Wade-Giles lüe -> Pinyin lue (略)
+    "nü": "nu",  # Wade-Giles nü -> Pinyin nu (女)
     "kuan": "guan",  # For Shang-kuan -> Shang-guan (上官)
     "pa": "ba",
     "po": "bo",
@@ -363,6 +366,13 @@ SYLLABLE_RULES.update(TAIWANESE_RULES)  # Medium priority (overrides Wade-Giles)
 SYLLABLE_RULES.update(CANTONESE_PHONETIC_RULES)  # Medium-high priority (overrides Taiwanese)
 SYLLABLE_RULES.update(CANTONESE_SURNAME_RULES)  # Highest priority (overrides all)
 
+# Create non-Wade-Giles syllable rules for refactored pipeline
+# This preserves the same precedence order but excludes Wade-Giles syllable rules
+NON_WADE_GILES_SYLLABLE_RULES = {}
+NON_WADE_GILES_SYLLABLE_RULES.update(TAIWANESE_RULES)  # Medium priority
+NON_WADE_GILES_SYLLABLE_RULES.update(CANTONESE_PHONETIC_RULES)  # Medium-high priority
+NON_WADE_GILES_SYLLABLE_RULES.update(CANTONESE_SURNAME_RULES)  # Highest priority
+
 # Add back tokens that can appear as given names, using mappings consistent with CANTONESE_SURNAMES
 # This eliminates inconsistencies while preserving given-name reading capability
 SYLLABLE_RULES.update(
@@ -376,6 +386,25 @@ SYLLABLE_RULES.update(
         "yung": "rong",  # 容 - matches CANTONESE_SURNAMES mapping
         "kut": "qu",  # 屈 - matches CANTONESE_SURNAMES mapping
         "qen": "chen",  # 陈 - Wade-Giles ch'en → qen conversion result
+        "seung": "song",  # 宋 - matches CANTONESE_SURNAMES mapping
+        # Hokkien/Teochew romanization mappings
+        "chee": "qi",  # 智/齐 - Hokkien/Teochew romanization
+        "hean": "xian",  # 贤/先 - Hokkien/Teochew romanization
+    }
+)
+
+# Add the same given-name tokens to non-Wade-Giles rules (excluding Wade-Giles-specific "qen")
+NON_WADE_GILES_SYLLABLE_RULES.update(
+    {
+        "shing": "cheng",  # 成 - matches CANTONESE_SURNAMES mapping
+        "lok": "luo",  # 洛 - matches CANTONESE_SURNAMES mapping
+        "pak": "bai",  # 白 - matches CANTONESE_SURNAMES mapping
+        "tou": "du",  # 杜 - matches CANTONESE_SURNAMES mapping
+        "tso": "cao",  # 曹 - matches CANTONESE_SURNAMES mapping
+        "yan": "yan",  # 颜 - matches CANTONESE_SURNAMES mapping
+        "yung": "rong",  # 容 - matches CANTONESE_SURNAMES mapping
+        "kut": "qu",  # 屈 - matches CANTONESE_SURNAMES mapping
+        # NOTE: "qen": "chen" is Wade-Giles specific, handled in unified Wade-Giles function
         "seung": "song",  # 宋 - matches CANTONESE_SURNAMES mapping
         # Hokkien/Teochew romanization mappings
         "chee": "qi",  # 智/齐 - Hokkien/Teochew romanization
@@ -664,8 +693,8 @@ KOREAN_ONLY_SURNAMES = frozenset(
         "bark",
         "bag",
         # "choi" removed - it's a Cantonese surname (蔡) that overlaps with Korean, belongs in OVERLAPPING_KOREAN_SURNAMES
-        "kang",
-        "gong",
+        # "kang" removed - it's a Chinese surname (康) that overlaps with Korean, belongs in OVERLAPPING_KOREAN_SURNAMES  
+        # "gong" removed - it's a Chinese surname (龚/宫/公) that overlaps with Korean, belongs in OVERLAPPING_KOREAN_SURNAMES
         "yoon",
         "jang",
         "seo",
@@ -682,7 +711,7 @@ KOREAN_ONLY_SURNAMES = frozenset(
         "nam",
         "shim",
         "noh",
-        "ha",
+        # "ha" removed - it's a Chinese surname (哈/夏) that overlaps with Korean, belongs in OVERLAPPING_KOREAN_SURNAMES
         "joo",
         "bae",
         "ryu",
@@ -691,12 +720,12 @@ KOREAN_ONLY_SURNAMES = frozenset(
         "suh",
         "won",
         "ryoo",
-        "koo",
+        # "koo" removed - it's a Chinese surname (古/顾) that overlaps with Korean, belongs in OVERLAPPING_KOREAN_SURNAMES
         "yeo",
         "pyo",
         # Additional Korean-only surnames
         "son",
-        "an",
+        # "an" removed - it's a Chinese surname (安) that overlaps with Korean, belongs in OVERLAPPING_KOREAN_SURNAMES
         "oh",
         "go",
         "roh",
@@ -800,6 +829,12 @@ OVERLAPPING_KOREAN_SURNAMES = frozenset(
         "song",  # 송/宋 - Common in both
         "ho",  # 호/何 - Korean Ho, Chinese He
         "na",  # 나/娜/那 - Korean surname, also Chinese surname and given name
+        # Moved from KOREAN_ONLY_SURNAMES due to Chinese overlap
+        "gong",  # 공/龚/宫/公 - Korean Gong, Chinese Gong (freq: 2058.5)
+        "koo",  # 구/古/顾 - Korean Koo/Gu, Chinese Gu (freq: 2155.2)
+        "kang",  # 강/康 - Korean Kang, Chinese Kang (freq: 1637.9)
+        "an",  # 안/安 - Korean An, Chinese An (freq: 1465.0)
+        "ha",  # 하/哈/夏 - Korean Ha, Chinese Ha/Xia (freq: 60.4)
     }
 )
 
@@ -1080,8 +1115,15 @@ FORBIDDEN_PHONETIC_PATTERNS = frozenset(
         "ea",
         "oo",
         "aw",
-        "ew",
         "ow",
+        # Specific Western name patterns (replacing broad "ew")
+        "drew",      # Catches 'andrew', 'drew'
+        "thew",      # Catches 'matthew'  
+        "newt",      # Catches 'newton', 'newt'
+        "stew",      # Catches 'stewart', 'stew'
+        "witt",      # Catches 'hewitt', 'dewitt'
+        "well",      # Catches 'newell', 'sewell', 'jewell'
+        "owell",     # Catches 'lowell', 'powell', 'howell'
         # English word endings
         "ty",
         "ry",
@@ -1478,5 +1520,33 @@ WESTERN_NAMES = frozenset(
         "eli",
         "wade",
         "heidi",
+        # Common short Western names that bypass other filters
+        "ian",
+        "ken",
+        "ben",
+        "dan",
+        "tim",
+        "jim",
+        "tom",
+        "ray",
+        "roy",
+        "jay",
+        "guy",
+        "leo",
+        "joe",
+        "may",
+        "kay",
+        "kim",
+        "amy",
+        "ann",
+        "eva",
+        "jan",
+        "lou",
+        "nan",
+        "pat",
+        "sue",
+        "val",
+        "wes",
+        "zoe",
     }
 )

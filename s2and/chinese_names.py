@@ -180,7 +180,8 @@ from dataclasses import dataclass, replace
 import pypinyin
 from s2and.chinese_names_data import (
     ROMANIZATION_EXCEPTIONS,
-    SYLLABLE_RULES,
+    NON_WADE_GILES_SYLLABLE_RULES,
+    WADE_GILES_SYLLABLE_RULES,
     ONE_LETTER_RULES,
     CANTONESE_SURNAMES,
     KOREAN_ONLY_SURNAMES,
@@ -442,8 +443,8 @@ class ChineseNameConfig:
             han_roman_splitter=_HAN_ROMAN_SPLITTER,
             ascii_alpha_pattern=re.compile(r"[A-Za-z]"),
             clean_roman_pattern=re.compile(
-                r"[^A-Za-z-''']"
-            ),  # PRESERVE both ASCII and full-width apostrophes for Wade-Giles
+                r"[^A-Za-z\u00C0-\u00FF\u0100-\u017F-''']"
+            ),  # PRESERVE ASCII letters, Latin-1 Supplement (À-ÿ), Latin Extended-A (Ā-ſ), hyphens and apostrophes for romanization systems
             camel_case_finder=re.compile(r"[A-Z][a-z]+"),
             clean_pattern=re.compile(_CLEAN_PATTERN_COMBINED),
             forbidden_patterns_regex=_FORBIDDEN_PATTERNS_REGEX,
@@ -707,7 +708,7 @@ class NormalizationService:
         conversions override prefix-level conversions. This creates specific precedence:
         
         1. EXCEPTIONS → SYLLABLE_RULES → ONE_LETTER_RULES
-        2. Prefix-based Wade-Giles conversions (_apply_wade_giles_conversions)
+        2. Unified Wade-Giles conversions (_apply_unified_wade_giles)
         3. SYLLABLE_RULES (second pass to handle Wade-Giles conversion results)
         
         WADE-GILES PRECEDENCE COMPLEXITY:
@@ -716,7 +717,7 @@ class NormalizationService:
         
         Example of syllable-level override:
         - Token "tsu" → SYLLABLE_RULES contains "tsu": "cu" (step 2)
-        - This prevents _apply_wade_giles_conversions from seeing "ts" → "z" (step 4)
+        - This prevents _apply_unified_wade_giles from seeing "ts" → "z" (step 4)
         - Result: "tsu" → "cu" (intended behavior, but complex)
         
         This design handles edge cases like complete syllable mappings that cannot
@@ -732,79 +733,78 @@ class NormalizationService:
         # Step 1: Lowercase for consistent processing
         low = token.lower()
 
-        # Step 2: Apply three-layer romanization precedence system (with apostrophes intact)
-        # Optimized with .get() to avoid redundant hashing on hits
-        for layer in (ROMANIZATION_EXCEPTIONS, SYLLABLE_RULES, ONE_LETTER_RULES):
-            mapped = layer.get(low)
-            if mapped:
-                return mapped
+        # Step 2: Apply non-Wade-Giles romanization precedence system (with apostrophes intact)
+        # Check EXCEPTIONS first
+        mapped = ROMANIZATION_EXCEPTIONS.get(low)
+        if mapped:
+            return mapped
+            
+        # Check non-Wade-Giles syllable rules (Cantonese, Taiwanese, etc.)
+        mapped = NON_WADE_GILES_SYLLABLE_RULES.get(low)
+        if mapped:
+            return mapped
+            
+        # Check ONE_LETTER_RULES
+        mapped = ONE_LETTER_RULES.get(low)
+        if mapped:
+            return mapped
 
         # Step 3: Apply Wade-Giles conversions BEFORE removing apostrophes
-        wade_giles_result = self._apply_wade_giles_conversions(low)
+        wade_giles_result = self._apply_unified_wade_giles(low)
 
-        # Step 4: Apply SYLLABLE_RULES to Wade-Giles conversion results
+        # Step 4: Apply non-Wade-Giles syllable rules to Wade-Giles conversion results
         # This handles cases like ch'en → qen → chen
-        mapped_result = SYLLABLE_RULES.get(wade_giles_result)
+        mapped_result = NON_WADE_GILES_SYLLABLE_RULES.get(wade_giles_result)
         if mapped_result:
             wade_giles_result = mapped_result
+        # Special case: Handle Wade-Giles specific "qen" → "chen" conversion
+        elif wade_giles_result == "qen":
+            wade_giles_result = "chen"
 
         # Step 5: Remove apostrophes and hyphens from the final result
         return wade_giles_result.translate(self._config.hyphens_apostrophes_tr)
 
-    def _apply_wade_giles_conversions(self, token: str) -> str:
+
+    def _apply_unified_wade_giles(self, token: str) -> str:
         """
-        Apply Wade-Giles conversion rules using optimized compiled regex (O(1) performance).
-
-        SYLLABLE-LEVEL vs PREFIX-LEVEL PRECEDENCE:
+        Unified Wade-Giles conversion with explicit precedence handling.
         
-        This function handles PREFIX-LEVEL Wade-Giles conversions only. It operates at 
-        lower precedence than SYLLABLE-LEVEL conversions that are already applied in 
-        SYLLABLE_RULES.
+        Replicates current behavior exactly with clearer precedence order:
+        1. Syllable-level Wade-Giles exceptions (tsu→cu overrides ts→z)
+        2. Prefix-level Wade-Giles conversions (ts'→c, ch'→q, ts→z, hs→x)
+        3. Suffix-level Wade-Giles conversions (ien→ian, ih→i, ueh→ue, ung→ong)
         
-        KEY DESIGN PRINCIPLE:
-        Syllable-level rules like "tsu" → "cu" must run BEFORE prefix rules like "ts" → "z"
-        to handle exceptions to systematic conversion patterns.
+        This consolidates Wade-Giles logic that was previously split between
+        SYLLABLE_RULES and _apply_wade_giles_conversions.
         
-        PRECEDENCE CHAIN EXAMPLES:
-        1. "tsu" → SYLLABLE_RULES "tsu": "cu" (fires first) → result: "cu"
-           PREFIX rule "ts" → "z" never sees the token
-        
-        2. "tseng" → No syllable rule match → PREFIX rule "ts" → "z" → result: "zeng"
-        
-        3. "ch'en" → No syllable rule match → PREFIX rule "ch'" → "q" → result: "qen"
-           Then SYLLABLE_RULES second pass: "qen" → "chen"
-        
-        This creates implicit precedence: Syllable-level WG > Prefix-level WG
-        
-        SYSTEMATIC PATTERNS HANDLED HERE:
-        - Aspirated consonants: ts', ch', k', t', p' → c, q, k, t, p
-        - Unaspirated consonants: ts, ch, hs → z, zh/j, x
-        - Context-sensitive: ch → j (before i/ia/ie/iu) vs zh (elsewhere)
-        
-        This optimization replaces the previous O(N·M) linear scan with a single regex
-        substitution, providing significant performance improvement at high throughput.
-
         Args:
-            token: Lowercase token WITH apostrophes intact (e.g., "ts'ai", "ch'en")
-
+            token: Lowercase token WITH apostrophes intact (e.g., "ts'ai", "ch'en", "tsu")
+            
         Returns:
-            Converted token (e.g., "cai", "chen")
+            Converted token (e.g., "cai", "qen", "cu")
         """
+        # Step 1: Syllable-level Wade-Giles exceptions (highest precedence)
+        # These complete syllable mappings take precedence over systematic prefix rules
+        if token in WADE_GILES_SYLLABLE_RULES:
+            return WADE_GILES_SYLLABLE_RULES[token]
+        
+        # Step 2: Prefix-level Wade-Giles conversions (moved from _apply_wade_giles_conversions)
         # Fast path: Handle exact match for single "j" first
         if token == "j":
-            return "r"
+            result = "r"
+        else:
+            def wade_giles_replacer(match):
+                """Replacement function for Wade-Giles regex substitution."""
+                # Find which group matched (groups are 1-indexed)
+                for i, group in enumerate(match.groups(), 1):
+                    if group is not None:
+                        return _WADE_GILES_REPLACEMENTS[i - 1]
+                return match.group(0)  # Fallback (should never happen)
 
-        def wade_giles_replacer(match):
-            """Replacement function for Wade-Giles regex substitution."""
-            # Find which group matched (groups are 1-indexed)
-            for i, group in enumerate(match.groups(), 1):
-                if group is not None:
-                    return _WADE_GILES_REPLACEMENTS[i - 1]
-            return match.group(0)  # Fallback (should never happen)
+            # Apply prefix conversions with single regex substitution
+            result = _WADE_GILES_REGEX.sub(wade_giles_replacer, token)
 
-        # Apply prefix conversions with single regex substitution
-        result = _WADE_GILES_REGEX.sub(wade_giles_replacer, token)
-
+        # Step 3: Suffix-level Wade-Giles conversions
         def suffix_replacer(match):
             """Replacement function for suffix regex substitution."""
             # Find which group matched (groups are 1-indexed)
@@ -1378,6 +1378,7 @@ class DataInitializationService:
                 "hun",  # 魂/浑 - valid Chinese syllable, not in givenname.csv
                 "za",  # 咱 - valid Chinese syllable, not in givenname.csv
                 "cuan",  # 爨 - rare but valid Chinese syllable for compound names
+                "we",  # 伟 - valid Chinese syllable, needed for compounds like "wewei"
             }
         )
 

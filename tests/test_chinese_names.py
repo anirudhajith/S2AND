@@ -285,6 +285,63 @@ CHINESE_NAME_TEST_CASES = [
     ("Wu Kuaile", (True, "Kuai-Le Wu")),  # Tests 'kuai' syllable preserved
     ("Wang Shuaiming", (True, "Shuai-Ming Wang")),  # Tests 'shuai' syllable preserved
     ("Li Hualiang", (True, "Hua-Liang Li")),  # Tests compound splitting still works
+    # Wade-Giles edge case tests for refactoring golden master
+    ("Li Tsu", (True, "Tsu Li")),  # Tests tsu→cu syllable precedence over ts→z prefix
+    ("Wang Tseng", (True, "Tseng Wang")),  # Tests ts→z prefix when no syllable match
+    ("Chen Tsi", (True, "Tsi Chen")),  # Tests tsi→ci syllable precedence
+    ("Wu Tzu", (True, "Tzu Wu")),  # Tests tzu→zi syllable precedence
+    ("Zhang Hsien", (True, "Hsien Zhang")),  # Tests hs→x prefix conversion
+    ("Huang Hsia", (True, "Hsia Huang")),  # Tests hsia→xia syllable conversion
+    ("Zhou Chuang", (True, "Chuang Zhou")),  # Tests chuang→zhuang syllable conversion
+    ("Gao Chuai", (True, "Chuai Gao")),  # Tests chuai→zhuai syllable conversion
+    ("Sun Chueh", (True, "Chueh Sun")),  # Tests chueh→jue syllable conversion
+    ("Ma Chui", (True, "Chui Ma")),  # Tests chui→zhui syllable conversion
+    ("Xu Erh", (True, "Erh Xu")),  # Tests erh→er syllable conversion
+    ("Fan Chien", (True, "Chien Fan")),  # Tests ien→ian suffix conversion potential
+    # Korean surname overlap fix verification
+    ("Kong Kung", (True, "Kong Kung")),  # Tests gong classification fix - should now work
+    # Additional tests for moved surnames (Korean overlap fixes)
+    ("Gong Wei", (True, "Wei Gong")),  # Direct gong test
+    ("Li Gong", (True, "Gong Li")),  # gong as given name  
+    ("Koo Ming", (True, "Ming Koo")),  # koo surname test
+    ("Zhang Koo", (True, "Zhang Koo")),  # koo as given name (name order preserved)
+    ("Kang Wei", (True, "Wei Kang")),  # kang surname test
+    ("Wang Kang", (True, "Kang Wang")),  # kang as given name
+    ("An Li", (True, "An Li")),  # an surname test (name order preserved)
+    ("Chen An", (True, "An Chen")),  # an as given name
+    ("Ha Wei", (True, "Ha Wei")),  # ha surname test (name order preserved)
+    ("Liu Ha", (True, "Ha Liu")),  # ha as given name
+    # Wade-Giles forms that convert to moved surnames
+    ("Wei Kung", (True, "Wei Kung")),  # kung→gong conversion test (name order preserved)
+    ("Kung Li", (True, "Kung Li")),  # kung→gong as surname test (name order preserved)
+    # Forbidden pattern fix - Chinese names with "ew" compounds that should now work
+    ("Li Wewei", (True, "We-Wei Li")),  # Tests "we" syllable addition to plausible_components
+    ("Zhang Wewei", (True, "We-Wei Zhang")),  # Tests compound splitting of "wewei" -> "we" + "wei"
+    ("Wang Weming", (True, "We-Ming Wang")),  # Another "we" compound test
+    ("Chen Wenjun", (True, "Wen-Jun Chen")),  # Tests that similar patterns still work
+    # Mixed Han + non-initial roman tokens (parenthetical given names)
+    ("张（Wei）Ming", (True, "Ming Zhang")),  # Han surname + roman given name in parentheses
+    ("李（Peter）Chen", (True, "Li Chen")),  # Han surname, Western given name stripped 
+    ("Wang（小明）Zhang", (True, "Zhang Wang")),  # Roman surname + Han given name in parentheses
+    ("陈（David）Liu", (True, "Chen Liu")),  # Han surname, Western given name stripped
+    ("Zhou（Mary）Li", (True, "Li Zhou")),  # Mixed Han/Roman with Western name stripped
+    ("刘（Thomas）Wang", (True, "Liu Wang")),  # Han surname, Western given name stripped
+    # Three-token given names (common in mainland ID data)
+    ("Li Wei Ming Hua", (True, "Wei-Ming-Hua Li")),  # 4 tokens: surname + 3-part given name
+    ("Zhang San Ge Zi", (True, "San-Ge-Zi Zhang")),  # 4 tokens: compound hyphenated given name
+    ("Chen Yi Er San", (True, "Yi-Er-San Chen")),  # 4 tokens: numerical given name components
+    ("Wang A B C", (True, "A-B-C Wang")),  # 4 tokens: single-letter given name components
+    ("Liu Xiao Ming Li", (True, "Xiao-Ming-Li Liu")),  # 4 tokens: common 3-part given name
+    ("Zhou Da Zhong Xiao", (True, "Da-Zhong-Xiao Zhou")),  # 4 tokens: size-based given name
+    # Wade-Giles syllables with ü (now work correctly with comprehensive diacritical support)
+    ("Yü Li", (True, "Yü Li")),  # Wade-Giles yü -> yu conversion works correctly
+    ("Li Yü", (True, "Yü Li")),  # Wade-Giles yü -> yu conversion works correctly
+    ("Nü Wa", (True, "Nü Wa")),  # Wade-Giles nü -> nu conversion works correctly
+    ("Wa Nü", (True, "Nü Wa")),  # Wade-Giles nü -> nu conversion works correctly
+    ("Lü Wei", (True, "Wei Lü")),  # Wade-Giles lü -> lu conversion now works correctly
+    ("Chü Chen", (True, "Chü Chen")),  # Wade-Giles chü -> ju conversion works correctly
+    ("Lü Buwei", (True, "Bu-Wei Lü")),  # Historical Chinese name now works with ü support
+    # Note: Comprehensive diacritical mark support added for romanization systems
 ]
 
 # Non-Chinese names that should return False (failure reason varies)
@@ -428,12 +485,32 @@ NON_CHINESE_TEST_CASES = [
     "Soo, Kim Min",  # Korean name in comma format
     "Anh, Nguyen Van",  # Vietnamese name in comma format
     "Martinez, Gloria",  # Western name with forbidden "gl" pattern
+    # Korean names with overlapping surnames (should still be rejected due to Korean given names)
+    "Gong Min-soo",  # Overlapping surname + Korean given name patterns
+    "Kang Young-ho",  # Overlapping surname + Korean given name patterns
+    "An Bo-ram",  # Overlapping surname + Korean given name patterns
+    "Koo Hye-jin",  # Overlapping surname + Korean given name patterns
+    "Ha Min-jun",  # Overlapping surname + Korean given name patterns
     # Test cases for Korean overlap case sensitivity (Concern 2) - different cases should all be rejected
     "Ho Yung lee",  # Lowercase lee with Korean context - should be rejected
     "Ho Yung LEE",  # Uppercase LEE with Korean context - should be rejected
     # Additional cases to ensure consistent Korean detection regardless of case
     "Min Soo LEE",  # Uppercase LEE
     "Jin Ho lee",  # Lowercase lee
+    # Western names with specific "ew" patterns (should still be blocked after pattern refinement)
+    "Andrew Smith",  # Contains "drew" pattern
+    "Matthew Johnson",  # Contains "thew" pattern
+    "Drew Wilson",  # Contains "drew" pattern
+    "Stewart Jones",  # Contains "stew" pattern
+    "Newton Miller",  # Contains "newt" pattern
+    "Hewitt Davis",  # Contains "witt" pattern
+    "Newell Garcia",  # Contains "well" pattern
+    "Powell Martinez",  # Contains "owell" pattern
+    "Andrew Chen",  # Western first name + Chinese surname (should be blocked)
+    "Matthew Li",  # Western first name + Chinese surname (should be blocked)
+    # Mixed parenthetical cases that should be rejected (Western names in parentheses)
+    "Zhang（Andrew）Smith",  # Mixed with Western name
+    "李（Peter）Johnson",  # Mixed with Western surname
 ]
 
 # Combine all test cases - Chinese with expected outcomes, non-Chinese just names

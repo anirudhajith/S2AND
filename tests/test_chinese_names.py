@@ -131,11 +131,11 @@ CHINESE_NAME_TEST_CASES = [
     ("Cheung Hok Yau", (True, "Hok-Yau Cheung")),
     ("Chow Yun Fat", (True, "Yun-Fat Chow")),
     ("Ng Man Tat", (True, "Man-Tat Ng")),
-    # ("Leung Chiu Wai", (True, "Chiu-Wai Leung")), # TODO
+    ("Leung Chiu Wai", (True, "Chiu-Wai Leung")),
     ("Kwok Fu Shing", (True, "Fu-Shing Kwok")),
     ("Lam Ching Ying", (True, "Ching-Ying Lam")),
     ("Yeung Chin Wah", (True, "Chin-Wah Yeung")),
-    # ("Tsang Chi Wai", (True, "Chi-Wai Tsang")), # TODO
+    ("Tsang Chi Wai", (True, "Chi-Wai Tsang")),
     ("Fung Hiu Man", (True, "Hiu-Man Fung")),
     ("Tse Ting Fung", (True, "Ting-Fung Tse")),
     ("Szeto Wah", (True, "Wah Szeto")),

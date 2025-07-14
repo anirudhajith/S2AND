@@ -307,14 +307,16 @@ WADE_GILES_SYLLABLE_RULES = {
     "chuan": "zhuan",
     "chueh": "jue",
     "chui": "zhui",
-    "tsu": "cu",
-    "tsi": "ci",
-    # "tso": "cuo",  # Removed - surname-specific mapping, keep in CANTONESE_SURNAMES only
-    "tsa": "ca",
+    # Special syllable-level Wade-Giles mappings (can't be handled by prefix rules)
+    "tsu": "cu",  # Complete syllable mapping (ts + u -> cu, not zu)
+    "tsi": "ci",  # Complete syllable mapping (ts + i -> ci, not zi)
+    "tsa": "ca",  # Complete syllable mapping (ts + a -> ca, not za)
+    "tzu": "zi",  # Complete syllable mapping (tz + u -> zi, not zu)
+    # Removed truly redundant rules:
+    # "ssu": "si",    # Now handled by szu -> si conversion
+    # "szu": "si",    # Now handled by szu -> si conversion (kept one instance)
     # Additional Wade-Giles mappings for compound surnames
-    "ssu": "si",  # For Ssu-ma -> Si-ma (司马)
-    "szu": "si",  # Alternative for Ssu
-    "tzu": "zi",  # For compound surnames
+    "szu": "si",  # Keep this one for compound surnames like Ssu-ma
     "ko": "ge",  # For Chu-ko -> Zhu-ge (诸葛)
     "hsia": "xia",  # For Hsia-hou -> Xia-hou (夏侯)
     "hsi": "xi",  # For Hsi-men -> Xi-men (西门)

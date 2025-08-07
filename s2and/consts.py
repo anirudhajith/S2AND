@@ -10,6 +10,7 @@ try:
     PROJECT_ROOT_PATH = os.path.abspath(os.path.join(__file__, os.pardir, os.pardir))
 except NameError:
     PROJECT_ROOT_PATH = os.path.abspath(os.path.join(os.getcwd()))
+PROJECT_ROOT_PATH = "/home/anirudha/S2AND" # hot-fix for gantry
 
 # load up the path_configs and check if they are set
 CONFIG_LOCATION = os.path.join(PROJECT_ROOT_PATH, "data", "path_config.json")

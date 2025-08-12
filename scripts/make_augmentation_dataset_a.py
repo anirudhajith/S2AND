@@ -5,7 +5,7 @@ CONFIG_LOCATION = os.path.abspath(os.path.join(__file__, os.pardir, os.pardir, "
 with open(CONFIG_LOCATION) as _json_file:
     CONFIG = json.load(_json_file)
 
-import pickle
+import pickle5 as pickle
 import requests
 import pandas as pd
 from s2and.data import ANDData

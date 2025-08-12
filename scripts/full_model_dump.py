@@ -11,7 +11,7 @@ os.environ["OMP_NUM_THREADS"] = "1"
 
 import numpy as np
 import logging
-import pickle
+import pickle5 as pickle
 
 # create logger with 'spam_application'
 logger = logging.getLogger("s2and")

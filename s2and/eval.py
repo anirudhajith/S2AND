@@ -1,7 +1,7 @@
 from typing import Dict, Optional, Any, List, Tuple, TYPE_CHECKING, Union
 
 import logging
-import pickle
+import pickle5 as pickle
 import json
 import warnings
 from collections import Counter

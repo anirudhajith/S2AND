@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 import argparse
 import logging
-import pickle
+import pickle5 as pickle
 import copy
 import random
 from collections import defaultdict

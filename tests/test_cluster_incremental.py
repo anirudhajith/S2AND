@@ -1,7 +1,7 @@
 import unittest
 import pytest
 import numpy as np
-import pickle
+import pickle5 as pickle
 
 from s2and.data import ANDData
 from s2and.model import Clusterer

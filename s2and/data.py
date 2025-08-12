@@ -5,7 +5,7 @@ import json
 import numpy as np
 import pandas as pd
 import logging
-import pickle
+import pickle5 as pickle
 import multiprocessing
 from tqdm import tqdm
 

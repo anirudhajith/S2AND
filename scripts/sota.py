@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 import argparse
 import logging
-import pickle
+import pickle5 as pickle
 
 logger = logging.getLogger("s2and")
 

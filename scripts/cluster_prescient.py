@@ -5,7 +5,7 @@ Try running clustering with the trained model on PreScient data.
 import os
 import argparse
 
-import pickle
+import pickle5 as pickle
 from s2and.data import ANDData
 from s2and.eval import cluster_eval
 from s2and.consts import FEATURIZER_VERSION, DEFAULT_CHUNK_SIZE, PROJECT_ROOT_PATH

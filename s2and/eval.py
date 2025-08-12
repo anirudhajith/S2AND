@@ -1,7 +1,7 @@
 from typing import Dict, Optional, Any, List, Tuple, TYPE_CHECKING, Union
 
 import logging
-import pickle5 as pickle
+import pickle5 as pickle; import sys; sys.setrecursionlimit(3000000000)
 import json
 import warnings
 from collections import Counter

@@ -2,7 +2,7 @@
 Note: This script won't run because it relies on an internal Semantic Scholar package
 called pys2, and is here for documentation of how the name count features were built.
 """
-import pickle5 as pickle
+import pickle5 as pickle; import sys; sys.setrecursionlimit(3000000000)
 from pys2 import _evaluate_redshift_query
 from s2and.text import normalize_text
 

@@ -27,7 +27,7 @@ os.environ["S2AND_CACHE"] = os.path.join(CONFIG["internal_data_dir"], ".feature_
 import numpy as np
 import logging
 import argparse
-import pickle5 as pickle
+import pickle5 as pickle; import sys; sys.setrecursionlimit(3000000000)
 import json
 import pandas as pd
 from tqdm import tqdm

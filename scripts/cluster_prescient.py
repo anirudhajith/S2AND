@@ -6,7 +6,7 @@ import os
 import sys
 import argparse
 
-import pickle5 as pickle
+import pickle5 as pickle; import sys; sys.setrecursionlimit(3000000000)
 from s2and.data import ANDData
 from s2and.eval import cluster_eval
 from s2and.consts import FEATURIZER_VERSION, DEFAULT_CHUNK_SIZE, PROJECT_ROOT_PATH
@@ -15,7 +15,6 @@ import numpy as np
 from s2and.model import PairwiseModeler, Clusterer
 
 if __name__ == "__main__":
-    sys.setrecursionlimit(3000000)
     parser = argparse.ArgumentParser(description="Cluster PreScient data with trained S2AND model.")
     parser.add_argument("--papers_path", type=str, required=True, help="Path to the PreScient papers JSON file.")
     parser.add_argument("--signatures_path", type=str, required=True, help="Path to the PreScient signatures JSON file.")

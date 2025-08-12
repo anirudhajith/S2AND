@@ -11,7 +11,7 @@ os.environ["OMP_NUM_THREADS"] = "1"
 
 import logging
 from collections import defaultdict
-import pickle5 as pickle
+import pickle5 as pickle; import sys; sys.setrecursionlimit(3000000000)
 import numpy as np
 import pandas as pd
 import random

@@ -9,7 +9,7 @@ os.environ["OMP_NUM_THREADS"] = "8"
 
 import argparse
 import logging
-import pickle5 as pickle
+import pickle5 as pickle; import sys; sys.setrecursionlimit(3000000000)
 from tqdm import tqdm
 
 logger = logging.getLogger("s2and")

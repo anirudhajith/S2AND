@@ -1,7 +1,7 @@
 import unittest
 import pytest
 import numpy as np
-import pickle5 as pickle
+import pickle5 as pickle; import sys; sys.setrecursionlimit(3000000000)
 
 from s2and.data import ANDData
 from s2and.model import Clusterer

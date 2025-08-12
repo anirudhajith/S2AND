@@ -16,7 +16,7 @@ os.environ["OMP_NUM_THREADS"] = "8"
 import copy
 import argparse
 import logging
-import pickle5 as pickle; import sys; sys.setrecursionlimit(2000000000)
+import pickle
 from typing import Dict, Any, Optional, List
 from collections import defaultdict
 

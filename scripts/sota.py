@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 import argparse
 import logging
-import pickle5 as pickle; import sys; sys.setrecursionlimit(2000000000)
+import pickle
 
 logger = logging.getLogger("s2and")
 

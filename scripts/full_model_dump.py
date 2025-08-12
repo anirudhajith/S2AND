@@ -11,7 +11,7 @@ os.environ["OMP_NUM_THREADS"] = "1"
 
 import numpy as np
 import logging
-import pickle5 as pickle; import sys; sys.setrecursionlimit(2000000000)
+import pickle
 
 # create logger with 'spam_application'
 logger = logging.getLogger("s2and")

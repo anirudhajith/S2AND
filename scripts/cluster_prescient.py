@@ -6,7 +6,7 @@ import os
 import sys
 import argparse
 
-import pickle5 as pickle; import sys; sys.setrecursionlimit(3000000000)
+import pickle5 as pickle; import sys; sys.setrecursionlimit(2000000000)
 from s2and.data import ANDData
 from s2and.eval import cluster_eval
 from s2and.consts import FEATURIZER_VERSION, DEFAULT_CHUNK_SIZE, PROJECT_ROOT_PATH

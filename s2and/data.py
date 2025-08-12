@@ -5,7 +5,7 @@ import json
 import numpy as np
 import pandas as pd
 import logging
-import pickle5 as pickle; import sys; sys.setrecursionlimit(3000000000)
+import pickle5 as pickle; import sys; sys.setrecursionlimit(2000000000)
 import multiprocessing
 from tqdm import tqdm
 

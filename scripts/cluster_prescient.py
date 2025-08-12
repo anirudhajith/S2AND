@@ -15,7 +15,7 @@ import numpy as np
 from s2and.model import PairwiseModeler, Clusterer
 
 if __name__ == "__main__":
-    sys.setrecursionlimit(30000)
+    sys.setrecursionlimit(3000000)
     parser = argparse.ArgumentParser(description="Cluster PreScient data with trained S2AND model.")
     parser.add_argument("--papers_path", type=str, required=True, help="Path to the PreScient papers JSON file.")
     parser.add_argument("--signatures_path", type=str, required=True, help="Path to the PreScient signatures JSON file.")

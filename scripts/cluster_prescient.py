@@ -64,7 +64,7 @@ if __name__ == "__main__":
     # this is the prod 1.1 model, which we may or may not retrain
     with open(args.model_path, "rb") as f:
         clusterer = pickle.load(f)["clusterer"]
-        cluster.n_jobs = args.n_jobs
+        clusterer.n_jobs = args.n_jobs
         clusterer.use_cache = False  # very important for this experiment!!!
 
     anddata = ANDData(

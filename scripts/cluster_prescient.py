@@ -39,7 +39,7 @@ if __name__ == "__main__":
         "venue_similarity",
         "year_diff",
         "title_similarity",
-        "reference_features",
+        #"reference_features",
         "misc_features",
         "name_counts",
         "embedding_similarity",
@@ -64,6 +64,7 @@ if __name__ == "__main__":
     # this is the prod 1.1 model, which we may or may not retrain
     with open(args.model_path, "rb") as f:
         clusterer = pickle.load(f)["clusterer"]
+        cluster.n_jobs = args.n_jobs
         clusterer.use_cache = False  # very important for this experiment!!!
 
     anddata = ANDData(
